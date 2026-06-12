@@ -40,6 +40,7 @@ class User extends Authenticatable
     }
 
     public function isSuperAdmin(): bool { return $this->role === 'super_admin'; }
+    public function isDeveloper(): bool  { return $this->role === 'developer'; }
     public function isOwner(): bool      { return $this->role === 'merchant_owner'; }
     public function isDispatcher(): bool { return $this->role === 'dispatcher'; }
     public function isDriver(): bool     { return $this->role === 'driver'; }

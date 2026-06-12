@@ -3,9 +3,12 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\Customer;
 use App\Models\DeliveryOrder;
 use App\Models\Driver;
+use App\Models\MerchantSetting;
 use App\Models\OrderStatusHistory;
+use App\Models\ProductCatalog;
 use App\Services\Geocoding\GoogleGeocodingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -36,12 +39,18 @@ class OrderController extends Controller
 
     public function store(Request $request)
     {
+        $this->normalizeTimeFields($request);
+
         $data = $request->validate([
             'customer_id'              => 'nullable|integer',
-            'customer_name'            => 'required|string|max:255',
+            'customer_name'            => 'nullable|string|max:255',
             'customer_phone'           => 'nullable|string|max:20',
-            'product_name'             => 'required|string|max:255',
+            'product_name'             => 'nullable|string|max:255',
             'product_notes'            => 'nullable|string',
+            'items'                    => 'nullable|array|min:1',
+            'items.*.name'             => 'required_with:items|string|max:255',
+            'items.*.quantity'         => 'nullable|numeric|min:0',
+            'items.*.notes'            => 'nullable|string',
             'order_value'              => 'nullable|numeric|min:0',
             'delivery_address'         => 'required|string',
             'delivery_latitude'        => 'nullable|numeric|between:-90,90',
@@ -53,6 +62,29 @@ class OrderController extends Controller
             'driver_id'                => 'nullable|integer|exists:drivers,id',
         ]);
 
+        $merchantId = $request->user()->merchant_id;
+
+        // Fill in customer snapshot from the selected customer if not provided
+        if (!empty($data['customer_id']) && (empty($data['customer_name']) || empty($data['customer_phone']))) {
+            $customer = Customer::where('merchant_id', $merchantId)->find($data['customer_id']);
+            if ($customer) {
+                $data['customer_name']  = $data['customer_name']  ?? $customer->customer_name;
+                $data['customer_phone'] = $data['customer_phone'] ?? $customer->phone;
+            }
+        }
+
+        if (empty($data['customer_name'])) {
+            return response()->json(['message' => 'Customer name is required.', 'errors' => ['customer_name' => ['Customer name is required.']]], 422);
+        }
+
+        // Build product_name summary + persist item lines
+        $data['product_name'] = $this->buildProductSummary($data);
+
+        // Default delivery window start to "now" if not provided
+        if (empty($data['requested_delivery_start'])) {
+            $data['requested_delivery_start'] = now()->format('H:i');
+        }
+
         // Auto-geocode
         if (empty($data['delivery_latitude']) && !empty($data['delivery_address'])) {
             $geo = $this->geocoder->geocode($data['delivery_address']);
@@ -61,8 +93,6 @@ class OrderController extends Controller
                 $data['delivery_longitude'] = $geo['longitude'];
             }
         }
-
-        $merchantId = $request->user()->merchant_id;
 
         // Generate order number
         $today    = now()->format('Ymd');
@@ -79,12 +109,70 @@ class OrderController extends Controller
             'created_by'       => $request->user()->id,
         ]);
 
+        $this->recordProductCatalog($merchantId, $data);
+
         // If driver assigned at creation
         if (!empty($data['driver_id'])) {
             $this->assignDriver($order, $data['driver_id'], $request->user());
         }
 
         return response()->json(['data' => $order->load(['driver:id,driver_name', 'customer:id,customer_name'])], 201);
+    }
+
+    /**
+     * date_format:H:i rejects empty strings (nullable only short-circuits on null),
+     * so blank time inputs from the frontend must be converted to null first.
+     */
+    private function normalizeTimeFields(Request $request): void
+    {
+        foreach (['requested_delivery_start', 'requested_delivery_end'] as $field) {
+            if ($request->has($field) && $request->input($field) === '') {
+                $request->merge([$field => null]);
+            }
+        }
+    }
+
+    private function buildProductSummary(array $data): string
+    {
+        if (!empty($data['items'])) {
+            return collect($data['items'])
+                ->map(function ($item) {
+                    $name = $item['name'];
+                    $qty  = $item['quantity'] ?? null;
+                    return $qty ? "{$name} x{$qty}" : $name;
+                })
+                ->implode(', ');
+        }
+
+        return $data['product_name'] ?? '';
+    }
+
+    private function recordProductCatalog(int $merchantId, array $data): void
+    {
+        $names = !empty($data['items'])
+            ? collect($data['items'])->pluck('name')->filter()->unique()
+            : collect([$data['product_name'] ?? null])->filter();
+
+        foreach ($names as $name) {
+            $catalog = ProductCatalog::firstOrNew(['merchant_id' => $merchantId, 'name' => $name]);
+            $catalog->usage_count = ($catalog->exists ? $catalog->usage_count : 0) + 1;
+            $catalog->last_used_at = now();
+            $catalog->save();
+        }
+    }
+
+    public function productSuggestions(Request $request)
+    {
+        $request->validate(['q' => 'nullable|string']);
+
+        $results = ProductCatalog::where('merchant_id', $request->user()->merchant_id)
+            ->when($request->q, fn($q, $s) => $q->where('name', 'like', "%{$s}%"))
+            ->orderByDesc('usage_count')
+            ->orderByDesc('last_used_at')
+            ->limit(8)
+            ->pluck('name');
+
+        return response()->json(['data' => $results]);
     }
 
     public function show(Request $request, DeliveryOrder $order)
@@ -96,10 +184,15 @@ class OrderController extends Controller
     public function update(Request $request, DeliveryOrder $order)
     {
         $this->authorizeMerchant($request, $order->merchant_id);
+        $this->normalizeTimeFields($request);
 
         $data = $request->validate([
             'product_name'             => 'sometimes|string|max:255',
             'product_notes'            => 'nullable|string',
+            'items'                    => 'nullable|array|min:1',
+            'items.*.name'             => 'required_with:items|string|max:255',
+            'items.*.quantity'         => 'nullable|numeric|min:0',
+            'items.*.notes'            => 'nullable|string',
             'order_value'              => 'nullable|numeric|min:0',
             'delivery_notes'           => 'nullable|string',
             'requested_delivery_date'  => 'nullable|date',
@@ -117,6 +210,11 @@ class OrderController extends Controller
         if (!$order->isPending()) {
             unset($data['delivery_address'], $data['delivery_latitude'], $data['delivery_longitude'],
                   $data['customer_name'], $data['customer_phone']);
+        }
+
+        if (!empty($data['items'])) {
+            $data['product_name'] = $this->buildProductSummary($data);
+            $this->recordProductCatalog($order->merchant_id, $data);
         }
 
         $data['updated_by'] = $request->user()->id;
@@ -194,6 +292,51 @@ class OrderController extends Controller
     {
         $this->authorizeMerchant($request, $order->merchant_id);
         return response()->json(['data' => $order->statusHistory()->with('changedBy:id,name,role')->get()]);
+    }
+
+    public function klotters(Request $request)
+    {
+        $request->validate(['date' => 'nullable|date']);
+
+        $merchantId = $request->user()->merchant_id;
+        $date = $request->date ?? now()->format('Y-m-d');
+
+        $klotterSize = MerchantSetting::where('merchant_id', $merchantId)->value('klotter_size') ?? 7;
+
+        $orders = DeliveryOrder::with('driver:id,driver_name')
+            ->where('merchant_id', $merchantId)
+            ->where('requested_delivery_date', $date)
+            ->whereNotNull('driver_id')
+            ->orderBy('driver_id')
+            ->orderBy('route_sequence')
+            ->orderBy('order_created_at')
+            ->get();
+
+        $drivers = $orders->groupBy('driver_id')->map(function ($driverOrders) use ($klotterSize) {
+            $driver = $driverOrders->first()->driver;
+
+            $klotters = $driverOrders->values()->chunk($klotterSize)->map(function ($chunk, $index) {
+                return [
+                    'klotter_number' => $index + 1,
+                    'orders'         => $chunk->values(),
+                ];
+            })->values();
+
+            return [
+                'driver_id'   => $driver?->id,
+                'driver_name' => $driver?->driver_name,
+                'total_orders'=> $driverOrders->count(),
+                'klotters'    => $klotters,
+            ];
+        })->values();
+
+        return response()->json([
+            'data' => [
+                'date'         => $date,
+                'klotter_size' => $klotterSize,
+                'drivers'      => $drivers,
+            ],
+        ]);
     }
 
     public function geocode(Request $request)

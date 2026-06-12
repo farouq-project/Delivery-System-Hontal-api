@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\V1\DriverAppController;
 use App\Http\Controllers\Api\V1\DriverController;
 use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\RouteController;
+use App\Http\Controllers\Api\V1\SettingsController;
+use App\Http\Controllers\Api\V1\UserController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -29,7 +31,9 @@ Route::prefix('v1')->group(function () {
         Route::post('geocode/address', [OrderController::class, 'geocode']);
 
         // Customers
-        Route::get('customers/search',    [CustomerController::class, 'search']);
+        Route::get('customers/search',         [CustomerController::class, 'search']);
+        Route::post('customers/bulk-delete',   [CustomerController::class, 'bulkDelete']);
+        Route::post('customers/import',        [CustomerController::class, 'import']);
         Route::apiResource('customers', CustomerController::class);
 
         // Drivers
@@ -39,6 +43,8 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('drivers', DriverController::class);
 
         // Orders
+        Route::get('orders/product-suggestions', [OrderController::class, 'productSuggestions']);
+        Route::get('orders/klotters',            [OrderController::class, 'klotters']);
         Route::post('orders/{order}/assign',  [OrderController::class, 'assign']);
         Route::post('orders/{order}/status',  [OrderController::class, 'updateStatus']);
         Route::get('orders/{order}/history',  [OrderController::class, 'history']);
@@ -52,6 +58,16 @@ Route::prefix('v1')->group(function () {
         Route::patch('routes/{route}/stops/{stop}',  [RouteController::class, 'updateStop']);
         Route::delete('routes/{route}/stops/{stop}', [RouteController::class, 'removeStop']);
         Route::apiResource('routes', RouteController::class)->except(['store']);
+
+        // Settings
+        Route::get('settings',   [SettingsController::class, 'show']);
+        Route::patch('settings', [SettingsController::class, 'update']);
+    });
+
+    // ─── USER MANAGEMENT (developer / super_admin / merchant_owner) ───
+    Route::middleware(['auth:sanctum', 'role:super_admin,developer,merchant_owner'])->group(function () {
+        Route::post('users/{user}/reset-password', [UserController::class, 'resetPassword']);
+        Route::apiResource('users', UserController::class);
     });
 
     // ─── DRIVER APP ROUTES ────────────────────────────────────────────

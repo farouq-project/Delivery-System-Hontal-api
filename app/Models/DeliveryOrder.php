@@ -13,7 +13,7 @@ class DeliveryOrder extends Model
     protected $fillable = [
         'ulid', 'order_number', 'merchant_id', 'driver_id', 'customer_id',
         'customer_name', 'customer_phone',
-        'product_name', 'product_notes', 'order_value',
+        'product_name', 'product_notes', 'items', 'order_value',
         'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_notes',
         'requested_delivery_date', 'requested_delivery_start', 'requested_delivery_end',
         'status', 'failure_reason', 'cancellation_reason',
@@ -23,6 +23,7 @@ class DeliveryOrder extends Model
     ];
 
     protected $casts = [
+        'items' => 'array',
         'order_value' => 'float',
         'delivery_latitude' => 'float',
         'delivery_longitude' => 'float',

@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Services\Geocoding\GoogleGeocodingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 
 class CustomerController extends Controller
 {
@@ -34,7 +35,7 @@ class CustomerController extends Controller
             'customer_name'      => 'required|string|max:255',
             'phone'              => 'nullable|string|max:20',
             'email'              => 'nullable|email|max:255',
-            'default_address'    => 'required|string',
+            'default_address'    => 'nullable|string',
             'default_latitude'   => 'nullable|numeric|between:-90,90',
             'default_longitude'  => 'nullable|numeric|between:-180,180',
             'vip_level'          => 'nullable|in:standard,silver,gold,platinum',
@@ -74,7 +75,7 @@ class CustomerController extends Controller
             'customer_name'     => 'sometimes|string|max:255',
             'phone'             => 'nullable|string|max:20',
             'email'             => 'nullable|email',
-            'default_address'   => 'sometimes|string',
+            'default_address'   => 'sometimes|nullable|string',
             'default_latitude'  => 'nullable|numeric|between:-90,90',
             'default_longitude' => 'nullable|numeric|between:-180,180',
             'vip_level'         => 'nullable|in:standard,silver,gold,platinum',
@@ -100,6 +101,123 @@ class CustomerController extends Controller
         $this->authorizeMerchant($request, $customer->merchant_id);
         $customer->delete();
         return response()->json(null, 204);
+    }
+
+    public function bulkDelete(Request $request)
+    {
+        $request->validate([
+            'ids'   => 'required|array|min:1',
+            'ids.*' => 'integer',
+        ]);
+
+        $merchantId = $request->user()->merchant_id;
+
+        $deleted = Customer::where('merchant_id', $merchantId)
+            ->whereIn('id', $request->ids)
+            ->delete();
+
+        return response()->json(['message' => "{$deleted} customer(s) deleted."]);
+    }
+
+    public function import(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls,csv|max:5120',
+        ]);
+
+        $merchantId = $request->user()->merchant_id;
+
+        $spreadsheet = IOFactory::load($request->file('file')->getRealPath());
+        $rows = $spreadsheet->getActiveSheet()->toArray(null, true, true, false);
+
+        if (empty($rows)) {
+            return response()->json(['message' => 'The file is empty.'], 422);
+        }
+
+        // First row = header. Map known column names (case-insensitive) to indexes.
+        $header = array_map(fn($h) => strtolower(trim((string) $h)), $rows[0]);
+        $columnMap = [
+            'customer_name'   => ['customer_name', 'name', 'nama', 'nama pelanggan'],
+            'phone'           => ['phone', 'phone_number', 'telepon', 'no telepon', 'no hp'],
+            'email'           => ['email'],
+            'default_address' => ['default_address', 'address', 'alamat'],
+            'vip_level'       => ['vip_level', 'vip', 'level'],
+            'notes'           => ['notes', 'note', 'catatan'],
+        ];
+
+        $columnIndex = [];
+        foreach ($columnMap as $field => $aliases) {
+            foreach ($header as $idx => $colName) {
+                if (in_array($colName, $aliases, true)) {
+                    $columnIndex[$field] = $idx;
+                    break;
+                }
+            }
+        }
+
+        if (!isset($columnIndex['customer_name'])) {
+            return response()->json(['message' => 'The file must contain a "customer_name" (or "name") column.'], 422);
+        }
+
+        $validVipLevels = ['standard', 'silver', 'gold', 'platinum'];
+        $imported = 0;
+        $skipped  = 0;
+        $errors   = [];
+
+        for ($i = 1; $i < count($rows); $i++) {
+            $row = $rows[$i];
+
+            $get = fn($field) => isset($columnIndex[$field]) ? trim((string) ($row[$columnIndex[$field]] ?? '')) : '';
+
+            $customerName = $get('customer_name');
+            if ($customerName === '') {
+                $skipped++;
+                continue;
+            }
+
+            $vipLevel = strtolower($get('vip_level'));
+            if (!in_array($vipLevel, $validVipLevels, true)) {
+                $vipLevel = 'standard';
+            }
+
+            $address = $get('default_address');
+            $latitude = null;
+            $longitude = null;
+
+            if ($address !== '') {
+                $geo = $this->geocoder->geocode($address);
+                if ($geo) {
+                    $latitude  = $geo['latitude'];
+                    $longitude = $geo['longitude'];
+                }
+            }
+
+            try {
+                Customer::create([
+                    'ulid'              => Str::ulid(),
+                    'merchant_id'       => $merchantId,
+                    'customer_name'     => $customerName,
+                    'phone'             => $get('phone') ?: null,
+                    'email'             => $get('email') ?: null,
+                    'default_address'   => $address ?: null,
+                    'default_latitude'  => $latitude,
+                    'default_longitude' => $longitude,
+                    'vip_level'         => $vipLevel,
+                    'notes'             => $get('notes') ?: null,
+                ]);
+                $imported++;
+            } catch (\Throwable $e) {
+                $skipped++;
+                $errors[] = "Row " . ($i + 1) . ": " . $e->getMessage();
+            }
+        }
+
+        return response()->json([
+            'message'  => "Imported {$imported} customer(s), skipped {$skipped}.",
+            'imported' => $imported,
+            'skipped'  => $skipped,
+            'errors'   => array_slice($errors, 0, 10),
+        ]);
     }
 
     public function search(Request $request)

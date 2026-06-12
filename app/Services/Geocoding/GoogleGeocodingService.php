@@ -27,9 +27,11 @@ class GoogleGeocodingService
         return Cache::remember($cacheKey, $this->cacheTtl, function () use ($address) {
             try {
                 $response = Http::timeout(10)->get('https://maps.googleapis.com/maps/api/geocode/json', [
-                    'address' => $address,
-                    'region'  => 'id',
-                    'key'     => $this->apiKey,
+                    'address'    => $address,
+                    'region'     => 'id',
+                    'components' => 'country:ID',
+                    'language'   => 'id',
+                    'key'        => $this->apiKey,
                 ]);
 
                 $data = $response->json();
