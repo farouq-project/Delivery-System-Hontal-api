@@ -20,6 +20,7 @@ class DeliveryOrder extends Model
         'order_created_at', 'assigned_at', 'picked_up_at', 'delivered_at', 'failed_at',
         'route_sequence', 'estimated_distance_m', 'estimated_duration_min', 'actual_distance_m',
         'import_batch_id', 'external_order_id', 'created_by', 'updated_by',
+        'cashier_name', 'payment_method',
     ];
 
     protected $casts = [

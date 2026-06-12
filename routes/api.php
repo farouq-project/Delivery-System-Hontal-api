@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\DriverAppController;
 use App\Http\Controllers\Api\V1\DriverController;
 use App\Http\Controllers\Api\V1\OrderController;
+use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\RouteController;
 use App\Http\Controllers\Api\V1\SettingsController;
 use App\Http\Controllers\Api\V1\UserController;
@@ -45,10 +46,14 @@ Route::prefix('v1')->group(function () {
         // Orders
         Route::get('orders/product-suggestions', [OrderController::class, 'productSuggestions']);
         Route::get('orders/klotters',            [OrderController::class, 'klotters']);
+        Route::post('orders/bulk-assign',     [OrderController::class, 'bulkAssign']);
         Route::post('orders/{order}/assign',  [OrderController::class, 'assign']);
         Route::post('orders/{order}/status',  [OrderController::class, 'updateStatus']);
         Route::get('orders/{order}/history',  [OrderController::class, 'history']);
         Route::apiResource('orders', OrderController::class);
+
+        // Reports
+        Route::get('reports/cashier-summary', [ReportController::class, 'cashierSummary']);
 
         // Routes
         Route::post('routes/generate',               [RouteController::class, 'generate']);

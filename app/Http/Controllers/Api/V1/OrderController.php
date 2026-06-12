@@ -60,6 +60,8 @@ class OrderController extends Controller
             'requested_delivery_start' => 'nullable|date_format:H:i',
             'requested_delivery_end'   => 'nullable|date_format:H:i',
             'driver_id'                => 'nullable|integer|exists:drivers,id',
+            'cashier_name'             => 'nullable|in:Mian,Sela,Epa,Tira',
+            'payment_method'           => 'nullable|in:cash,transfer,qris',
         ]);
 
         $merchantId = $request->user()->merchant_id;
@@ -204,6 +206,8 @@ class OrderController extends Controller
             'delivery_longitude'  => 'nullable|numeric|between:-180,180',
             'customer_name'       => 'sometimes|string|max:255',
             'customer_phone'      => 'nullable|string|max:20',
+            'cashier_name'        => 'nullable|in:Mian,Sela,Epa,Tira',
+            'payment_method'      => 'nullable|in:cash,transfer,qris',
         ]);
 
         // Lock address fields after assignment
@@ -247,6 +251,31 @@ class OrderController extends Controller
         $this->assignDriver($order, $driver->id, $request->user());
 
         return response()->json(['data' => $order->fresh()->load(['driver:id,driver_name'])]);
+    }
+
+    public function bulkAssign(Request $request)
+    {
+        $merchantId = $request->user()->merchant_id;
+
+        $request->validate([
+            'order_ids' => 'required|array|min:1',
+            'order_ids.*' => 'integer|exists:delivery_orders,id',
+            'driver_id' => 'required|integer|exists:drivers,id',
+        ]);
+
+        $driver = Driver::where('id', $request->driver_id)
+            ->where('merchant_id', $merchantId)
+            ->firstOrFail();
+
+        $orders = DeliveryOrder::where('merchant_id', $merchantId)
+            ->whereIn('id', $request->order_ids)
+            ->get();
+
+        foreach ($orders as $order) {
+            $this->assignDriver($order, $driver->id, $request->user());
+        }
+
+        return response()->json(['data' => ['assigned' => $orders->count()]]);
     }
 
     public function updateStatus(Request $request, DeliveryOrder $order)
