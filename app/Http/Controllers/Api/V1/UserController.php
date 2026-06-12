@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\Driver;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -60,6 +61,10 @@ class UserController extends Controller
             'is_active'   => $data['is_active'] ?? true,
         ]);
 
+        if ($data['role'] === 'driver') {
+            $this->ensureDriverRecord($user);
+        }
+
         return response()->json(['data' => $this->formatUser($user)], 201);
     }
 
@@ -83,6 +88,11 @@ class UserController extends Controller
         ]);
 
         $user->update($data);
+
+        if (($data['role'] ?? null) === 'driver') {
+            $this->ensureDriverRecord($user);
+        }
+
         return response()->json(['data' => $this->formatUser($user->fresh())]);
     }
 
@@ -136,6 +146,24 @@ class UserController extends Controller
         if ($target->merchant_id !== $authUser->merchant_id || in_array($target->role, ['super_admin', 'developer'])) {
             abort(403, 'Access denied.');
         }
+    }
+
+    private function ensureDriverRecord(User $user): void
+    {
+        if (Driver::where('user_id', $user->id)->exists() || !$user->merchant_id) {
+            return;
+        }
+
+        Driver::create([
+            'ulid'          => Str::ulid(),
+            'merchant_id'   => $user->merchant_id,
+            'user_id'       => $user->id,
+            'driver_name'   => $user->name,
+            'phone'         => $user->phone ?? '',
+            'vehicle_type'  => 'motorcycle',
+            'vehicle_plate' => '',
+            'status'        => 'offline',
+        ]);
     }
 
     private function formatUser(User $user): array

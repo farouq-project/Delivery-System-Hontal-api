@@ -239,6 +239,23 @@ class OrderController extends Controller
         return response()->json(null, 204);
     }
 
+    public function bulkDelete(Request $request)
+    {
+        $merchantId = $request->user()->merchant_id;
+
+        $request->validate([
+            'order_ids'   => 'required|array|min:1',
+            'order_ids.*' => 'integer|exists:delivery_orders,id',
+        ]);
+
+        $deleted = DeliveryOrder::where('merchant_id', $merchantId)
+            ->whereIn('id', $request->order_ids)
+            ->whereIn('status', ['pending', 'cancelled'])
+            ->delete();
+
+        return response()->json(['data' => ['deleted' => $deleted]]);
+    }
+
     public function assign(Request $request, DeliveryOrder $order)
     {
         $this->authorizeMerchant($request, $order->merchant_id);
