@@ -49,6 +49,7 @@ Route::prefix('v1')->group(function () {
         Route::post('orders/bulk-assign',     [OrderController::class, 'bulkAssign']);
         Route::post('orders/bulk-delete',     [OrderController::class, 'bulkDelete']);
         Route::post('orders/{order}/assign',  [OrderController::class, 'assign']);
+        Route::post('orders/{order}/unassign', [OrderController::class, 'unassign']);
         Route::post('orders/{order}/status',  [OrderController::class, 'updateStatus']);
         Route::get('orders/{order}/history',  [OrderController::class, 'history']);
         Route::apiResource('orders', OrderController::class);

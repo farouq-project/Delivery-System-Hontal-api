@@ -9,6 +9,7 @@ use App\Models\Driver;
 use App\Models\MerchantSetting;
 use App\Models\OrderStatusHistory;
 use App\Models\ProductCatalog;
+use App\Models\RouteStop;
 use App\Services\Geocoding\GoogleGeocodingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -231,9 +232,11 @@ class OrderController extends Controller
     {
         $this->authorizeMerchant($request, $order->merchant_id);
 
-        if (!in_array($order->status, ['pending', 'cancelled'])) {
-            return response()->json(['message' => 'Only pending or cancelled orders can be deleted.'], 422);
+        if (!in_array($order->status, ['pending', 'assigned', 'cancelled'])) {
+            return response()->json(['message' => 'Only pending, assigned, or cancelled orders can be deleted.'], 422);
         }
+
+        RouteStop::where('order_id', $order->id)->delete();
 
         $order->delete();
         return response()->json(null, 204);
@@ -248,10 +251,14 @@ class OrderController extends Controller
             'order_ids.*' => 'integer|exists:delivery_orders,id',
         ]);
 
-        $deleted = DeliveryOrder::where('merchant_id', $merchantId)
+        $orderIds = DeliveryOrder::where('merchant_id', $merchantId)
             ->whereIn('id', $request->order_ids)
-            ->whereIn('status', ['pending', 'cancelled'])
-            ->delete();
+            ->whereIn('status', ['pending', 'assigned', 'cancelled'])
+            ->pluck('id');
+
+        RouteStop::whereIn('order_id', $orderIds)->delete();
+
+        $deleted = DeliveryOrder::whereIn('id', $orderIds)->delete();
 
         return response()->json(['data' => ['deleted' => $deleted]]);
     }
@@ -266,6 +273,37 @@ class OrderController extends Controller
             ->firstOrFail();
 
         $this->assignDriver($order, $driver->id, $request->user());
+
+        return response()->json(['data' => $order->fresh()->load(['driver:id,driver_name'])]);
+    }
+
+    public function unassign(Request $request, DeliveryOrder $order)
+    {
+        $this->authorizeMerchant($request, $order->merchant_id);
+
+        if (!$order->driver_id) {
+            return response()->json(['message' => 'Order has no assigned driver.'], 422);
+        }
+
+        $fromStatus = $order->status;
+        $previousDriverId = $order->driver_id;
+
+        $order->update(['driver_id' => null, 'status' => 'pending', 'assigned_at' => null]);
+
+        RouteStop::where('order_id', $order->id)->delete();
+
+        try {
+            OrderStatusHistory::create([
+                'order_id'        => $order->id,
+                'from_status'     => $fromStatus,
+                'to_status'       => 'pending',
+                'changed_by'      => $request->user()->id,
+                'changed_by_role' => $request->user()->role,
+                'notes'           => "Unassigned from driver #{$previousDriverId}",
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         return response()->json(['data' => $order->fresh()->load(['driver:id,driver_name'])]);
     }

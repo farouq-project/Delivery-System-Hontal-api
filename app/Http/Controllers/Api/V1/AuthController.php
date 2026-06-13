@@ -29,6 +29,14 @@ class AuthController extends Controller
         }
 
         $user->update(['last_login_at' => now()]);
+
+        if ($user->role === 'driver') {
+            $user->loadMissing('driver');
+            if ($user->driver && $user->driver->status === 'offline') {
+                $user->driver->update(['status' => 'available']);
+            }
+        }
+
         $token = $user->createToken('api-token')->plainTextToken;
 
         return response()->json([
