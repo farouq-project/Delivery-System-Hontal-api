@@ -104,7 +104,7 @@ class UserController extends Controller
             return response()->json(['message' => 'You cannot delete your own account.'], 422);
         }
 
-        $user->delete();
+        $user->forceDelete();
         return response()->json(null, 204);
     }
 

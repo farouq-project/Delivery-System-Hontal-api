@@ -402,14 +402,18 @@ class OrderController extends Controller
         $fromStatus = $order->status;
         $order->update(['driver_id' => $driverId, 'status' => 'assigned', 'assigned_at' => now()]);
 
-        OrderStatusHistory::create([
-            'order_id'        => $order->id,
-            'from_status'     => $fromStatus,
-            'to_status'       => 'assigned',
-            'changed_by'      => $user->id,
-            'changed_by_role' => $user->role,
-            'notes'           => "Assigned to driver #{$driverId}",
-        ]);
+        try {
+            OrderStatusHistory::create([
+                'order_id'        => $order->id,
+                'from_status'     => $fromStatus,
+                'to_status'       => 'assigned',
+                'changed_by'      => $user->id,
+                'changed_by_role' => $user->role,
+                'notes'           => "Assigned to driver #{$driverId}",
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 
     private function authorizeMerchant(Request $request, int $merchantId): void
