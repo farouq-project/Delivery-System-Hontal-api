@@ -34,41 +34,30 @@ class RouteController extends Controller
     public function generate(Request $request)
     {
         $request->validate([
-            'route_date'  => 'required|date',
-            'driver_ids'  => 'required|array|min:1',
-            'driver_ids.*' => 'integer|exists:drivers,id',
-            'order_ids'   => 'nullable|array',
-            'order_ids.*' => 'integer|exists:delivery_orders,id',
+            'route_date' => 'required|date',
         ]);
 
         $merchant = $request->user()->merchant;
         $merchant->load('vipConfigs');
 
-        // If no orders specified, pick all pending for that date
-        $orderIds = $request->order_ids;
-        if (empty($orderIds)) {
-            $orderIds = DeliveryOrder::where('merchant_id', $merchant->id)
-                ->where('status', 'pending')
-                ->where(function ($q) use ($request) {
-                    $q->where('requested_delivery_date', $request->route_date)
-                      ->orWhereNull('requested_delivery_date');
-                })
-                ->whereNotNull('delivery_latitude')
-                ->pluck('id')
-                ->toArray();
-        }
+        // Optimize stop sequencing for orders already manually assigned to a driver
+        $orderIds = DeliveryOrder::where('merchant_id', $merchant->id)
+            ->where('status', 'assigned')
+            ->whereNotNull('driver_id')
+            ->whereNotNull('delivery_latitude')
+            ->where(function ($q) use ($request) {
+                $q->where('requested_delivery_date', $request->route_date)
+                  ->orWhereNull('requested_delivery_date');
+            })
+            ->pluck('id')
+            ->toArray();
 
         if (empty($orderIds)) {
-            return response()->json(['message' => 'No pending orders found for this date.'], 422);
+            return response()->json(['message' => 'No assigned orders to optimize. Assign orders to drivers first.'], 422);
         }
 
         try {
-            $route = $this->engine->generate(
-                $merchant,
-                $request->driver_ids,
-                $orderIds,
-                $request->route_date
-            );
+            $route = $this->engine->generate($merchant, $orderIds, $request->route_date);
 
             return response()->json(['data' => $route], 201);
         } catch (\Exception $e) {
@@ -105,6 +94,21 @@ class RouteController extends Controller
         $this->authorizeMerchant($request, $route->merchant_id);
         $route->update(['locked_at' => null, 'locked_by' => null]);
         return response()->json(['data' => $route->fresh()]);
+    }
+
+    public function reset(Request $request, Route $route)
+    {
+        $this->authorizeMerchant($request, $route->merchant_id);
+
+        $orderIds = RouteStop::where('route_id', $route->id)->pluck('order_id');
+
+        DeliveryOrder::whereIn('id', $orderIds)
+            ->whereNotIn('status', ['delivered', 'failed', 'cancelled'])
+            ->update(['status' => 'pending', 'driver_id' => null, 'assigned_at' => null, 'route_sequence' => null]);
+
+        $route->delete();
+
+        return response()->json(null, 204);
     }
 
     public function reoptimize(Request $request, Route $route)

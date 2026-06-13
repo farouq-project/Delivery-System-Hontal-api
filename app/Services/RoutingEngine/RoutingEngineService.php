@@ -9,7 +9,6 @@ use App\Models\Route;
 use App\Models\RouteAssignment;
 use App\Models\RouteStop;
 use App\Services\DistanceMatrix\GoogleDistanceMatrixService;
-use App\Services\RoutingEngine\Clustering\GeographicClusterer;
 use App\Services\RoutingEngine\Optimization\NearestNeighborSolver;
 use App\Services\RoutingEngine\Optimization\TwoOptImprover;
 use App\Services\RoutingEngine\Scoring\DistanceScorer;
@@ -24,7 +23,6 @@ class RoutingEngineService
 {
     public function __construct(
         private GoogleDistanceMatrixService $distanceMatrix,
-        private GeographicClusterer         $clusterer,
         private NearestNeighborSolver       $nnSolver,
         private TwoOptImprover              $twoOpt,
         private DistanceScorer              $distanceScorer,
@@ -34,84 +32,63 @@ class RoutingEngineService
     ) {}
 
     /**
-     * Generate a full route for the given orders and drivers.
+     * Optimize stop sequencing for orders already assigned to drivers.
+     * Driver allocation is decided manually beforehand (see RouteController::assignOrder) —
+     * this only orders each driver's existing stops for efficiency.
      */
     public function generate(
         Merchant $merchant,
-        array    $driverIds,
         array    $orderIds,
         string   $routeDate
     ): Route {
-        $orders  = DeliveryOrder::with('customer')
+        $orders = DeliveryOrder::with('customer')
             ->whereIn('id', $orderIds)
-            ->whereIn('status', ['pending'])
+            ->where('status', 'assigned')
+            ->whereNotNull('driver_id')
             ->where('merchant_id', $merchant->id)
             ->get();
 
-        $drivers = Driver::whereIn('id', $driverIds)
-            ->where('merchant_id', $merchant->id)
-            ->where('is_active', true)
-            ->get();
-
-        if ($orders->isEmpty() || $drivers->isEmpty()) {
-            throw new \RuntimeException('No valid orders or drivers for routing.');
+        if ($orders->isEmpty()) {
+            throw new \RuntimeException('No assigned orders to optimize.');
         }
+
+        $driverIds = $orders->pluck('driver_id')->unique()->values();
+        $drivers   = Driver::whereIn('id', $driverIds)->where('merchant_id', $merchant->id)->get();
 
         $settings = $merchant->settings ?? new \App\Models\MerchantSetting(['depot_latitude' => -6.9175, 'depot_longitude' => 107.6191]);
         $depot    = ['lat' => $settings->depot_latitude ?? -6.9175, 'lng' => $settings->depot_longitude ?? 107.6191];
 
-        // STEP 1: Score all orders
         $scoredOrders = $this->scoreOrders($orders, $merchant, $depot);
 
-        // STEP 2: Cluster orders
-        $orderPoints = [];
-        foreach ($orders as $order) {
-            if ($order->delivery_latitude && $order->delivery_longitude) {
-                $orderPoints[$order->id] = ['lat' => $order->delivery_latitude, 'lng' => $order->delivery_longitude];
-            }
-        }
-
-        $clusters = $this->clusterer->cluster($orderPoints, count($drivers));
-
-        // STEP 3: Assign clusters to drivers
-        $clusterAssignments = $this->assignClustersToDrivers($clusters, $drivers, $depot);
-
-        // STEP 4–5: Build route
-        $route = Route::create([
-            'ulid'              => Str::ulid(),
-            'merchant_id'       => $merchant->id,
-            'route_date'        => $routeDate,
-            'status'            => 'active',
-            'generation_method' => 'auto',
-            'generated_at'      => now(),
-            'total_drivers'     => count($clusterAssignments),
-        ]);
+        $route = Route::firstOrCreate(
+            ['merchant_id' => $merchant->id, 'route_date' => $routeDate],
+            ['ulid' => Str::ulid(), 'status' => 'active', 'generation_method' => 'auto', 'generated_at' => now()]
+        );
+        $route->update(['status' => 'active', 'generation_method' => 'auto', 'generated_at' => now()]);
 
         $totalStops    = 0;
         $totalDistance = 0;
-        $assignmentSeq = 1;
+        $ordersByDriver = $orders->groupBy('driver_id');
 
-        foreach ($clusterAssignments as $driverIdx => $assignedCluster) {
-            $driver    = $drivers->firstWhere('id', $assignedCluster['driver_id']);
-            $clusterOrderIds = $assignedCluster['order_ids'];
+        foreach ($ordersByDriver as $driverId => $driverOrders) {
+            $driver = $drivers->firstWhere('id', $driverId);
+            if (!$driver) continue;
 
-            if (empty($clusterOrderIds)) continue;
-
-            // Build matrix for this cluster
-            $clusterOrders = $orders->whereIn('id', $clusterOrderIds)->values();
-            [$orderedIds, $distSums, $etaData] = $this->optimizeCluster(
-                $driver, $depot, $clusterOrders, $scoredOrders, $settings
+            $assignment = RouteAssignment::firstOrCreate(
+                ['route_id' => $route->id, 'driver_id' => $driver->id],
+                [
+                    'sequence_number'    => $route->assignments()->count() + 1,
+                    'estimated_start_at' => Carbon::parse($routeDate . ' ' . ($settings->working_hours_start ?? '07:00:00')),
+                    'status'             => 'pending',
+                ]
             );
 
-            $assignment = RouteAssignment::create([
-                'route_id'          => $route->id,
-                'driver_id'         => $driver->id,
-                'sequence_number'   => $assignmentSeq++,
-                'total_stops'       => count($orderedIds),
-                'total_distance_m'  => $distSums,
-                'estimated_start_at' => Carbon::parse($routeDate . ' ' . ($settings->working_hours_start ?? '07:00:00')),
-                'status'            => 'pending',
-            ]);
+            // Re-sequence this driver's stops from scratch
+            RouteStop::where('route_assignment_id', $assignment->id)->delete();
+
+            [$orderedIds, $distSums, $etaData] = $this->optimizeCluster(
+                $driver, $depot, $driverOrders, $scoredOrders, $settings
+            );
 
             foreach ($orderedIds as $seq => $orderId) {
                 $scored   = $scoredOrders[$orderId] ?? [];
@@ -132,22 +109,22 @@ class RoutingEngineService
                     'duration_from_prev_min' => $etaEntry['duration_min'] ?? null,
                 ]);
 
-                // Update order status
-                DeliveryOrder::where('id', $orderId)->update([
-                    'status'           => 'assigned',
-                    'driver_id'        => $driver->id,
-                    'route_sequence'   => $seq + 1,
-                    'assigned_at'      => now(),
-                ]);
+                DeliveryOrder::where('id', $orderId)->update(['route_sequence' => $seq + 1]);
             }
+
+            $assignment->update(['total_stops' => count($orderedIds), 'total_distance_m' => $distSums]);
 
             $totalStops    += count($orderedIds);
             $totalDistance += $distSums;
         }
 
-        $route->update(['total_stops' => $totalStops, 'total_distance_m' => $totalDistance]);
+        $route->update([
+            'total_stops'      => $totalStops,
+            'total_distance_m' => $totalDistance,
+            'total_drivers'    => $ordersByDriver->count(),
+        ]);
 
-        return $route->load(['assignments.driver', 'assignments.stops.order']);
+        return $route->fresh()->load(['assignments.driver', 'assignments.stops.order']);
     }
 
     /**
@@ -279,55 +256,6 @@ class RoutingEngineService
         }
 
         return $scored;
-    }
-
-    private function assignClustersToDrivers(array $clusters, Collection $drivers, array $depot): array
-    {
-        $assignments = [];
-        $usedDrivers = [];
-
-        foreach ($clusters as $clusterIdx => $orderIds) {
-            // Find cluster centroid
-            $lats = $lngs = [];
-            foreach ($orderIds as $orderId) {
-                $order = DeliveryOrder::find($orderId);
-                if ($order && $order->delivery_latitude) {
-                    $lats[] = $order->delivery_latitude;
-                    $lngs[] = $order->delivery_longitude;
-                }
-            }
-            $centroid = empty($lats) ? $depot : ['lat' => array_sum($lats)/count($lats), 'lng' => array_sum($lngs)/count($lngs)];
-
-            // Find nearest available driver
-            $bestDriver = null;
-            $bestDist   = PHP_FLOAT_MAX;
-
-            foreach ($drivers as $driver) {
-                if (isset($usedDrivers[$driver->id])) continue;
-
-                $driverPos = ($driver->current_lat && $driver->current_lng)
-                    ? ['lat' => $driver->current_lat, 'lng' => $driver->current_lng]
-                    : $depot;
-
-                $dist = $this->haversineM($driverPos, $centroid);
-                if ($dist < $bestDist) {
-                    $bestDist   = $dist;
-                    $bestDriver = $driver;
-                }
-            }
-
-            if (!$bestDriver) {
-                $bestDriver = $drivers->first(fn($d) => !isset($usedDrivers[$d->id])) ?? $drivers->first();
-            }
-
-            $usedDrivers[$bestDriver->id] = true;
-            $assignments[$clusterIdx] = [
-                'driver_id' => $bestDriver->id,
-                'order_ids' => $orderIds,
-            ];
-        }
-
-        return $assignments;
     }
 
     private function optimizeCluster(Driver $driver, array $depot, Collection $orders, array $scoredOrders, $settings): array

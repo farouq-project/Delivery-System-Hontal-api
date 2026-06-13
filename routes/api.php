@@ -62,6 +62,7 @@ Route::prefix('v1')->group(function () {
         Route::post('routes/assign-order',           [RouteController::class, 'assignOrder']);
         Route::post('routes/{route}/lock',           [RouteController::class, 'lock']);
         Route::post('routes/{route}/unlock',         [RouteController::class, 'unlock']);
+        Route::post('routes/{route}/reset',          [RouteController::class, 'reset']);
         Route::post('routes/{route}/reoptimize',     [RouteController::class, 'reoptimize']);
         Route::patch('routes/{route}/stops/{stop}',  [RouteController::class, 'updateStop']);
         Route::delete('routes/{route}/stops/{stop}', [RouteController::class, 'removeStop']);
