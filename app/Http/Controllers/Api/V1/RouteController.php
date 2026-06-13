@@ -40,26 +40,12 @@ class RouteController extends Controller
         $merchant = $request->user()->merchant;
         $merchant->load('vipConfigs');
 
-        // Optimize stop sequencing for orders already manually assigned to a driver
-        $orderIds = DeliveryOrder::where('merchant_id', $merchant->id)
-            ->where('status', 'assigned')
-            ->whereNotNull('driver_id')
-            ->whereNotNull('delivery_latitude')
-            ->where(function ($q) use ($request) {
-                $q->where('requested_delivery_date', $request->route_date)
-                  ->orWhereNull('requested_delivery_date');
-            })
-            ->pluck('id')
-            ->toArray();
-
-        if (empty($orderIds)) {
-            return response()->json(['message' => 'No assigned orders to optimize. Assign orders to drivers first.'], 422);
-        }
-
         try {
-            $route = $this->engine->generate($merchant, $orderIds, $request->route_date);
+            $route = $this->engine->generate($merchant, $request->route_date);
 
-            return response()->json(['data' => $route], 201);
+            return response()->json(['data' => $this->loadFullRoute($route)], 201);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Exception $e) {
             return response()->json(['message' => 'Route generation failed: ' . $e->getMessage()], 500);
         }
@@ -200,10 +186,38 @@ class RouteController extends Controller
         $order  = DeliveryOrder::where('merchant_id', $merchantId)->findOrFail($request->order_id);
         $driver = Driver::where('merchant_id', $merchantId)->findOrFail($request->driver_id);
 
+        $route = $this->assignOrderToDriver($request, $order, $driver);
+
+        return response()->json(['data' => $this->loadFullRoute($route)]);
+    }
+
+    public function assignOrders(Request $request)
+    {
+        $merchantId = $request->user()->merchant_id;
+
+        $request->validate([
+            'order_ids'   => 'required|array|min:1',
+            'order_ids.*' => 'integer|exists:delivery_orders,id',
+            'driver_id'   => 'required|integer|exists:drivers,id',
+        ]);
+
+        $driver = Driver::where('merchant_id', $merchantId)->findOrFail($request->driver_id);
+        $orders = DeliveryOrder::where('merchant_id', $merchantId)->whereIn('id', $request->order_ids)->get();
+
+        $route = null;
+        foreach ($orders as $order) {
+            $route = $this->assignOrderToDriver($request, $order, $driver);
+        }
+
+        return response()->json(['data' => $this->loadFullRoute($route)]);
+    }
+
+    private function assignOrderToDriver(Request $request, DeliveryOrder $order, Driver $driver): Route
+    {
         $routeDate = $order->requested_delivery_date ?? now()->format('Y-m-d');
 
         $route = Route::firstOrCreate(
-            ['merchant_id' => $merchantId, 'route_date' => $routeDate],
+            ['merchant_id' => $driver->merchant_id, 'route_date' => $routeDate],
             [
                 'ulid'              => Str::ulid(),
                 'status'            => 'draft',
@@ -218,7 +232,7 @@ class RouteController extends Controller
             ['sequence_number' => $route->assignments()->count() + 1]
         );
 
-        // If the order already has a stop on this route, remove it before re-adding to the new assignment
+        // If the order already has a stop on this route (e.g. in the unassigned group), move it here
         $existingStop = RouteStop::where('route_id', $route->id)->where('order_id', $order->id)->first();
         if ($existingStop) {
             $oldAssignmentId = $existingStop->route_assignment_id;
@@ -259,7 +273,7 @@ class RouteController extends Controller
             report($e);
         }
 
-        return response()->json(['data' => $this->loadFullRoute($route)]);
+        return $route;
     }
 
     public function removeStop(Request $request, Route $route, RouteStop $stop)

@@ -60,6 +60,7 @@ Route::prefix('v1')->group(function () {
         // Routes
         Route::post('routes/generate',               [RouteController::class, 'generate']);
         Route::post('routes/assign-order',           [RouteController::class, 'assignOrder']);
+        Route::post('routes/assign-orders',          [RouteController::class, 'assignOrders']);
         Route::post('routes/{route}/lock',           [RouteController::class, 'lock']);
         Route::post('routes/{route}/unlock',         [RouteController::class, 'unlock']);
         Route::post('routes/{route}/reset',          [RouteController::class, 'reset']);

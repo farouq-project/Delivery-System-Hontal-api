@@ -32,33 +32,40 @@ class RoutingEngineService
     ) {}
 
     /**
-     * Optimize stop sequencing for orders already assigned to drivers.
-     * Driver allocation is decided manually beforehand (see RouteController::assignOrder) —
-     * this only orders each driver's existing stops for efficiency.
+     * Build/refresh today's route: sequence unassigned pending orders into an
+     * "unassigned" group (no driver yet) and re-sequence each driver's
+     * already-assigned stops. Driver allocation itself stays manual
+     * (see RouteController::assignOrder / assignOrders).
      */
-    public function generate(
-        Merchant $merchant,
-        array    $orderIds,
-        string   $routeDate
-    ): Route {
-        $orders = DeliveryOrder::with('customer')
-            ->whereIn('id', $orderIds)
-            ->where('status', 'assigned')
-            ->whereNotNull('driver_id')
-            ->where('merchant_id', $merchant->id)
-            ->get();
-
-        if ($orders->isEmpty()) {
-            throw new \RuntimeException('No assigned orders to optimize.');
-        }
-
-        $driverIds = $orders->pluck('driver_id')->unique()->values();
-        $drivers   = Driver::whereIn('id', $driverIds)->where('merchant_id', $merchant->id)->get();
-
+    public function generate(Merchant $merchant, string $routeDate): Route
+    {
         $settings = $merchant->settings ?? new \App\Models\MerchantSetting(['depot_latitude' => -6.9175, 'depot_longitude' => 107.6191]);
         $depot    = ['lat' => $settings->depot_latitude ?? -6.9175, 'lng' => $settings->depot_longitude ?? 107.6191];
 
-        $scoredOrders = $this->scoreOrders($orders, $merchant, $depot);
+        $dateFilter = function ($q) use ($routeDate) {
+            $q->where('requested_delivery_date', $routeDate)
+              ->orWhereNull('requested_delivery_date');
+        };
+
+        $pendingOrders = DeliveryOrder::with('customer')
+            ->where('merchant_id', $merchant->id)
+            ->where('status', 'pending')
+            ->whereNull('driver_id')
+            ->whereNotNull('delivery_latitude')
+            ->where($dateFilter)
+            ->get();
+
+        $assignedOrders = DeliveryOrder::with('customer')
+            ->where('merchant_id', $merchant->id)
+            ->where('status', 'assigned')
+            ->whereNotNull('driver_id')
+            ->whereNotNull('delivery_latitude')
+            ->where($dateFilter)
+            ->get();
+
+        if ($pendingOrders->isEmpty() && $assignedOrders->isEmpty()) {
+            throw new \RuntimeException('No orders with delivery locations to route.');
+        }
 
         $route = Route::firstOrCreate(
             ['merchant_id' => $merchant->id, 'route_date' => $routeDate],
@@ -66,65 +73,90 @@ class RoutingEngineService
         );
         $route->update(['status' => 'active', 'generation_method' => 'auto', 'generated_at' => now()]);
 
-        $totalStops    = 0;
-        $totalDistance = 0;
-        $ordersByDriver = $orders->groupBy('driver_id');
-
-        foreach ($ordersByDriver as $driverId => $driverOrders) {
-            $driver = $drivers->firstWhere('id', $driverId);
-            if (!$driver) continue;
+        // Group 1: unassigned pending orders, sequenced from the depot
+        if ($pendingOrders->isNotEmpty()) {
+            $scoredOrders = $this->scoreOrders($pendingOrders, $merchant, $depot);
 
             $assignment = RouteAssignment::firstOrCreate(
-                ['route_id' => $route->id, 'driver_id' => $driver->id],
-                [
-                    'sequence_number'    => $route->assignments()->count() + 1,
-                    'estimated_start_at' => Carbon::parse($routeDate . ' ' . ($settings->working_hours_start ?? '07:00:00')),
-                    'status'             => 'pending',
-                ]
+                ['route_id' => $route->id, 'driver_id' => null],
+                ['sequence_number' => 0, 'status' => 'pending']
             );
 
-            // Re-sequence this driver's stops from scratch
             RouteStop::where('route_assignment_id', $assignment->id)->delete();
 
-            [$orderedIds, $distSums, $etaData] = $this->optimizeCluster(
-                $driver, $depot, $driverOrders, $scoredOrders, $settings
+            [$orderedIds, $distSum, $etaData] = $this->optimizeCluster(
+                null, $depot, $pendingOrders, $scoredOrders, $settings
             );
 
-            foreach ($orderedIds as $seq => $orderId) {
-                $scored   = $scoredOrders[$orderId] ?? [];
-                $etaEntry = $etaData[$seq] ?? [];
+            $this->createStops($route, $assignment, $orderedIds, $scoredOrders, $etaData);
 
-                RouteStop::create([
-                    'route_id'            => $route->id,
-                    'route_assignment_id' => $assignment->id,
-                    'order_id'            => $orderId,
-                    'stop_sequence'       => $seq + 1,
-                    'distance_score'      => $scored['distance_score'] ?? 0,
-                    'waiting_score'       => $scored['waiting_score'] ?? 0,
-                    'window_score'        => $scored['window_score'] ?? 0,
-                    'vip_score'           => $scored['vip_score'] ?? 0,
-                    'total_score'         => $scored['total_score'] ?? 0,
-                    'estimated_arrival'   => $etaEntry['eta'] ?? null,
-                    'distance_from_prev_m'   => $etaEntry['distance_m'] ?? null,
-                    'duration_from_prev_min' => $etaEntry['duration_min'] ?? null,
-                ]);
+            $assignment->update(['total_stops' => count($orderedIds), 'total_distance_m' => $distSum]);
+        }
 
-                DeliveryOrder::where('id', $orderId)->update(['route_sequence' => $seq + 1]);
+        // Group 2: re-sequence each driver's already-assigned stops
+        if ($assignedOrders->isNotEmpty()) {
+            $scoredOrders = $this->scoreOrders($assignedOrders, $merchant, $depot);
+
+            $driverIds = $assignedOrders->pluck('driver_id')->unique()->values();
+            $drivers   = Driver::whereIn('id', $driverIds)->where('merchant_id', $merchant->id)->get();
+
+            foreach ($assignedOrders->groupBy('driver_id') as $driverId => $driverOrders) {
+                $driver = $drivers->firstWhere('id', $driverId);
+                if (!$driver) continue;
+
+                $assignment = RouteAssignment::firstOrCreate(
+                    ['route_id' => $route->id, 'driver_id' => $driver->id],
+                    [
+                        'sequence_number'    => $route->assignments()->count() + 1,
+                        'estimated_start_at' => Carbon::parse($routeDate . ' ' . ($settings->working_hours_start ?? '07:00:00')),
+                        'status'             => 'pending',
+                    ]
+                );
+
+                RouteStop::where('route_assignment_id', $assignment->id)->delete();
+
+                [$orderedIds, $distSum, $etaData] = $this->optimizeCluster(
+                    $driver, $depot, $driverOrders, $scoredOrders, $settings
+                );
+
+                $this->createStops($route, $assignment, $orderedIds, $scoredOrders, $etaData);
+
+                $assignment->update(['total_stops' => count($orderedIds), 'total_distance_m' => $distSum]);
             }
-
-            $assignment->update(['total_stops' => count($orderedIds), 'total_distance_m' => $distSums]);
-
-            $totalStops    += count($orderedIds);
-            $totalDistance += $distSums;
         }
 
         $route->update([
-            'total_stops'      => $totalStops,
-            'total_distance_m' => $totalDistance,
-            'total_drivers'    => $ordersByDriver->count(),
+            'total_stops'      => RouteStop::where('route_id', $route->id)->count(),
+            'total_distance_m' => $route->assignments()->sum('total_distance_m'),
+            'total_drivers'    => $route->assignments()->whereNotNull('driver_id')->count(),
         ]);
 
         return $route->fresh()->load(['assignments.driver', 'assignments.stops.order']);
+    }
+
+    private function createStops(Route $route, RouteAssignment $assignment, array $orderedIds, array $scoredOrders, array $etaData): void
+    {
+        foreach ($orderedIds as $seq => $orderId) {
+            $scored   = $scoredOrders[$orderId] ?? [];
+            $etaEntry = $etaData[$seq] ?? [];
+
+            RouteStop::create([
+                'route_id'            => $route->id,
+                'route_assignment_id' => $assignment->id,
+                'order_id'            => $orderId,
+                'stop_sequence'       => $seq + 1,
+                'distance_score'      => $scored['distance_score'] ?? 0,
+                'waiting_score'       => $scored['waiting_score'] ?? 0,
+                'window_score'        => $scored['window_score'] ?? 0,
+                'vip_score'           => $scored['vip_score'] ?? 0,
+                'total_score'         => $scored['total_score'] ?? 0,
+                'estimated_arrival'   => $etaEntry['eta'] ?? null,
+                'distance_from_prev_m'   => $etaEntry['distance_m'] ?? null,
+                'duration_from_prev_min' => $etaEntry['duration_min'] ?? null,
+            ]);
+
+            DeliveryOrder::where('id', $orderId)->update(['route_sequence' => $seq + 1]);
+        }
     }
 
     /**
@@ -258,10 +290,10 @@ class RoutingEngineService
         return $scored;
     }
 
-    private function optimizeCluster(Driver $driver, array $depot, Collection $orders, array $scoredOrders, $settings): array
+    private function optimizeCluster(?Driver $driver, array $depot, Collection $orders, array $scoredOrders, $settings): array
     {
         // Build coord list: [0 = depot/driver, 1..N = stops]
-        $driverPos = ($driver->current_lat && $driver->current_lng)
+        $driverPos = ($driver && $driver->current_lat && $driver->current_lng)
             ? ['lat' => $driver->current_lat, 'lng' => $driver->current_lng]
             : $depot;
 
