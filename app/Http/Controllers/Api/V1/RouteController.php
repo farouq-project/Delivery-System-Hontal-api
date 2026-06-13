@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\DeliveryOrder;
 use App\Models\Driver;
+use App\Models\OrderStatusHistory;
 use App\Models\Route;
+use App\Models\RouteAssignment;
 use App\Models\RouteStop;
 use App\Services\RoutingEngine\RoutingEngineService;
 use Illuminate\Http\Request;
@@ -78,12 +80,17 @@ class RouteController extends Controller
     {
         $this->authorizeMerchant($request, $route->merchant_id);
 
+        return response()->json(['data' => $this->loadFullRoute($route)]);
+    }
+
+    private function loadFullRoute(Route $route): Route
+    {
         $route->load(['assignments' => function ($q) {
             $q->with(['driver:id,driver_name,phone,status,current_lat,current_lng',
                       'stops' => fn($q) => $q->with('order:id,order_number,customer_name,delivery_address,delivery_latitude,delivery_longitude,status,requested_delivery_start,requested_delivery_end,product_name')->orderBy('stop_sequence')]);
         }]);
 
-        return response()->json(['data' => $route]);
+        return $route;
     }
 
     public function lock(Request $request, Route $route)
@@ -175,6 +182,80 @@ class RouteController extends Controller
         }
 
         return response()->json(['data' => $stop->fresh()]);
+    }
+
+    public function assignOrder(Request $request)
+    {
+        $merchantId = $request->user()->merchant_id;
+
+        $request->validate([
+            'order_id'  => 'required|integer|exists:delivery_orders,id',
+            'driver_id' => 'required|integer|exists:drivers,id',
+        ]);
+
+        $order  = DeliveryOrder::where('merchant_id', $merchantId)->findOrFail($request->order_id);
+        $driver = Driver::where('merchant_id', $merchantId)->findOrFail($request->driver_id);
+
+        $routeDate = $order->requested_delivery_date ?? now()->format('Y-m-d');
+
+        $route = Route::firstOrCreate(
+            ['merchant_id' => $merchantId, 'route_date' => $routeDate],
+            [
+                'ulid'              => Str::ulid(),
+                'status'            => 'draft',
+                'generation_method' => 'manual',
+                'generated_by'      => $request->user()->id,
+                'generated_at'      => now(),
+            ]
+        );
+
+        $assignment = RouteAssignment::firstOrCreate(
+            ['route_id' => $route->id, 'driver_id' => $driver->id],
+            ['sequence_number' => $route->assignments()->count() + 1]
+        );
+
+        // If the order already has a stop on this route, remove it before re-adding to the new assignment
+        $existingStop = RouteStop::where('route_id', $route->id)->where('order_id', $order->id)->first();
+        if ($existingStop) {
+            $oldAssignmentId = $existingStop->route_assignment_id;
+            $oldSeq = $existingStop->stop_sequence;
+            $existingStop->delete();
+            RouteStop::where('route_assignment_id', $oldAssignmentId)
+                ->where('stop_sequence', '>', $oldSeq)
+                ->decrement('stop_sequence');
+        }
+
+        $nextSeq = (int) RouteStop::where('route_assignment_id', $assignment->id)->max('stop_sequence') + 1;
+
+        RouteStop::create([
+            'route_id'            => $route->id,
+            'route_assignment_id' => $assignment->id,
+            'order_id'            => $order->id,
+            'stop_sequence'       => $nextSeq,
+            'is_manually_placed'  => true,
+        ]);
+
+        if (!$existingStop) {
+            $route->increment('total_stops');
+        }
+
+        $fromStatus = $order->status;
+        $order->update(['driver_id' => $driver->id, 'status' => 'assigned', 'assigned_at' => now()]);
+
+        try {
+            OrderStatusHistory::create([
+                'order_id'        => $order->id,
+                'from_status'     => $fromStatus,
+                'to_status'       => 'assigned',
+                'changed_by'      => $request->user()->id,
+                'changed_by_role' => $request->user()->role,
+                'notes'           => "Assigned to driver #{$driver->id} via dispatch board",
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        return response()->json(['data' => $this->loadFullRoute($route)]);
     }
 
     public function removeStop(Request $request, Route $route, RouteStop $stop)
