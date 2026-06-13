@@ -154,16 +154,20 @@ class UserController extends Controller
             return;
         }
 
-        Driver::create([
-            'ulid'          => Str::ulid(),
-            'merchant_id'   => $user->merchant_id,
-            'user_id'       => $user->id,
-            'driver_name'   => $user->name,
-            'phone'         => $user->phone ?? '',
-            'vehicle_type'  => 'motorcycle',
-            'vehicle_plate' => '',
-            'status'        => 'offline',
-        ]);
+        try {
+            Driver::create([
+                'ulid'          => Str::ulid(),
+                'merchant_id'   => $user->merchant_id,
+                'user_id'       => $user->id,
+                'driver_name'   => $user->name,
+                'phone'         => $user->phone ?? '',
+                'vehicle_type'  => 'motorcycle',
+                'vehicle_plate' => '',
+                'status'        => 'offline',
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 
     private function formatUser(User $user): array
