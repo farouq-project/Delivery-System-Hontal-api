@@ -51,7 +51,6 @@ class RoutingEngineService
             ->where('merchant_id', $merchant->id)
             ->where('status', 'pending')
             ->whereNull('driver_id')
-            ->whereNotNull('delivery_latitude')
             ->where($dateFilter)
             ->get();
 
@@ -59,12 +58,11 @@ class RoutingEngineService
             ->where('merchant_id', $merchant->id)
             ->where('status', 'assigned')
             ->whereNotNull('driver_id')
-            ->whereNotNull('delivery_latitude')
             ->where($dateFilter)
             ->get();
 
         if ($pendingOrders->isEmpty() && $assignedOrders->isEmpty()) {
-            throw new \RuntimeException('No orders with delivery locations to route.');
+            throw new \RuntimeException('No pending or assigned orders to route.');
         }
 
         $route = Route::firstOrCreate(
@@ -349,6 +347,15 @@ class RoutingEngineService
 
             $prevIdx = $curIdx;
         }
+
+        // Orders without a delivery location can't be geo-sequenced, but should
+        // still appear in the route, ordered by their waiting/window/VIP score.
+        $unlocated = $orders->reject(fn($order) => isset($indexMap[$order->id]))
+            ->sortByDesc(fn($order) => $scoredOrders[$order->id]['total_score'] ?? 0)
+            ->pluck('id')
+            ->all();
+
+        $orderedIds = [...$orderedIds, ...$unlocated];
 
         return [$orderedIds, $totalDistM, $etaData];
     }
