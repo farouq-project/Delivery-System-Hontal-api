@@ -54,15 +54,8 @@ class RoutingEngineService
             ->where($dateFilter)
             ->get();
 
-        $assignedOrders = DeliveryOrder::with('customer')
-            ->where('merchant_id', $merchant->id)
-            ->where('status', 'assigned')
-            ->whereNotNull('driver_id')
-            ->where($dateFilter)
-            ->get();
-
-        if ($pendingOrders->isEmpty() && $assignedOrders->isEmpty()) {
-            throw new \RuntimeException('No pending or assigned orders to route.');
+        if ($pendingOrders->isEmpty()) {
+            throw new \RuntimeException('No unassigned orders to route.');
         }
 
         $route = Route::firstOrCreate(
@@ -71,57 +64,24 @@ class RoutingEngineService
         );
         $route->update(['status' => 'active', 'generation_method' => 'auto', 'generated_at' => now()]);
 
-        // Group 1: unassigned pending orders, sequenced from the depot
-        if ($pendingOrders->isNotEmpty()) {
-            $scoredOrders = $this->scoreOrders($pendingOrders, $merchant, $depot);
+        // Sequence unassigned pending orders from the depot. Already-assigned
+        // orders keep whatever sequence/driver they were given manually.
+        $scoredOrders = $this->scoreOrders($pendingOrders, $merchant, $depot);
 
-            $assignment = RouteAssignment::firstOrCreate(
-                ['route_id' => $route->id, 'driver_id' => null],
-                ['sequence_number' => 0, 'status' => 'pending']
-            );
+        $assignment = RouteAssignment::firstOrCreate(
+            ['route_id' => $route->id, 'driver_id' => null],
+            ['sequence_number' => 0, 'status' => 'pending']
+        );
 
-            RouteStop::where('route_assignment_id', $assignment->id)->delete();
+        RouteStop::where('route_assignment_id', $assignment->id)->delete();
 
-            [$orderedIds, $distSum, $etaData] = $this->optimizeCluster(
-                null, $depot, $pendingOrders, $scoredOrders, $settings
-            );
+        [$orderedIds, $distSum, $etaData] = $this->optimizeCluster(
+            null, $depot, $pendingOrders, $scoredOrders, $settings
+        );
 
-            $this->createStops($route, $assignment, $orderedIds, $scoredOrders, $etaData);
+        $this->createStops($route, $assignment, $orderedIds, $scoredOrders, $etaData);
 
-            $assignment->update(['total_stops' => count($orderedIds), 'total_distance_m' => $distSum]);
-        }
-
-        // Group 2: re-sequence each driver's already-assigned stops
-        if ($assignedOrders->isNotEmpty()) {
-            $scoredOrders = $this->scoreOrders($assignedOrders, $merchant, $depot);
-
-            $driverIds = $assignedOrders->pluck('driver_id')->unique()->values();
-            $drivers   = Driver::whereIn('id', $driverIds)->where('merchant_id', $merchant->id)->get();
-
-            foreach ($assignedOrders->groupBy('driver_id') as $driverId => $driverOrders) {
-                $driver = $drivers->firstWhere('id', $driverId);
-                if (!$driver) continue;
-
-                $assignment = RouteAssignment::firstOrCreate(
-                    ['route_id' => $route->id, 'driver_id' => $driver->id],
-                    [
-                        'sequence_number'    => $route->assignments()->count() + 1,
-                        'estimated_start_at' => Carbon::parse($routeDate . ' ' . ($settings->working_hours_start ?? '07:00:00')),
-                        'status'             => 'pending',
-                    ]
-                );
-
-                RouteStop::where('route_assignment_id', $assignment->id)->delete();
-
-                [$orderedIds, $distSum, $etaData] = $this->optimizeCluster(
-                    $driver, $depot, $driverOrders, $scoredOrders, $settings
-                );
-
-                $this->createStops($route, $assignment, $orderedIds, $scoredOrders, $etaData);
-
-                $assignment->update(['total_stops' => count($orderedIds), 'total_distance_m' => $distSum]);
-            }
-        }
+        $assignment->update(['total_stops' => count($orderedIds), 'total_distance_m' => $distSum]);
 
         $route->update([
             'total_stops'      => RouteStop::where('route_id', $route->id)->count(),
