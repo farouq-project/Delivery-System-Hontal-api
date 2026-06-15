@@ -288,9 +288,17 @@ class OrderController extends Controller
         $fromStatus = $order->status;
         $previousDriverId = $order->driver_id;
 
-        $order->update(['driver_id' => null, 'status' => 'pending', 'assigned_at' => null]);
+        $order->update(['driver_id' => null, 'status' => 'pending', 'assigned_at' => null, 'route_sequence' => null]);
 
-        RouteStop::where('order_id', $order->id)->delete();
+        $stop = RouteStop::where('order_id', $order->id)->first();
+        if ($stop) {
+            $route = $stop->route;
+            RouteStop::where('route_assignment_id', $stop->route_assignment_id)
+                ->where('stop_sequence', '>', $stop->stop_sequence)
+                ->decrement('stop_sequence');
+            $stop->delete();
+            $route->decrement('total_stops');
+        }
 
         try {
             OrderStatusHistory::create([
