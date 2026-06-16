@@ -204,6 +204,10 @@ class RouteController extends Controller
         $driver = Driver::where('merchant_id', $merchantId)->findOrFail($request->driver_id);
         $orders = DeliveryOrder::where('merchant_id', $merchantId)->whereIn('id', $request->order_ids)->get();
 
+        // Sort by route_sequence (routing priority) so stop_sequence is assigned in score order.
+        // Orders without a route_sequence (unrouted) go last.
+        $orders = $orders->sortBy(fn($o) => $o->route_sequence ?? PHP_INT_MAX)->values();
+
         $route = null;
         foreach ($orders as $order) {
             $route = $this->assignOrderToDriver($request, $order, $driver);
