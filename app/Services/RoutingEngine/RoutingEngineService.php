@@ -17,6 +17,7 @@ use App\Services\RoutingEngine\Scoring\WaitingScorer;
 use App\Services\RoutingEngine\Scoring\WindowScorer;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class RoutingEngineService
@@ -68,6 +69,24 @@ class RoutingEngineService
         // orders keep whatever sequence/driver they were given manually.
         $scoredOrders = $this->scoreOrders($pendingOrders, $merchant, $depot);
 
+        Log::info('[ROUTE] Scoring results', [
+            'route_date'   => $routeDate,
+            'depot'        => $depot,
+            'order_count'  => $pendingOrders->count(),
+            'orders'       => $pendingOrders->map(fn($o) => [
+                'id'            => $o->id,
+                'customer'      => $o->customer_name,
+                'has_coords'    => (bool) ($o->delivery_latitude && $o->delivery_longitude),
+                'lat'           => $o->delivery_latitude,
+                'lng'           => $o->delivery_longitude,
+                'distance_score'=> $scoredOrders[$o->id]['distance_score'] ?? 'N/A',
+                'waiting_score' => $scoredOrders[$o->id]['waiting_score']  ?? 'N/A',
+                'window_score'  => $scoredOrders[$o->id]['window_score']   ?? 'N/A',
+                'vip_score'     => $scoredOrders[$o->id]['vip_score']      ?? 'N/A',
+                'total_score'   => $scoredOrders[$o->id]['total_score']    ?? 'N/A',
+            ])->values()->toArray(),
+        ]);
+
         $assignment = RouteAssignment::firstOrCreate(
             ['route_id' => $route->id, 'driver_id' => null],
             ['sequence_number' => 0, 'status' => 'pending']
@@ -78,6 +97,16 @@ class RoutingEngineService
         [$orderedIds, $distSum, $etaData] = $this->optimizeCluster(
             null, $depot, $pendingOrders, $scoredOrders, $settings
         );
+
+        Log::info('[ROUTE] Generated sequence', [
+            'total_distance_m' => $distSum,
+            'sequence'         => collect($orderedIds)->map(fn($id, $seq) => [
+                'seq'        => $seq + 1,
+                'order_id'   => $id,
+                'customer'   => $pendingOrders->firstWhere('id', $id)?->customer_name,
+                'total_score'=> $scoredOrders[$id]['total_score'] ?? 0,
+            ])->values()->toArray(),
+        ]);
 
         $this->createStops($route, $assignment, $orderedIds, $scoredOrders, $etaData);
 
@@ -208,6 +237,7 @@ class RoutingEngineService
 
     private function scoreOrders(Collection $orders, Merchant $merchant, array $depot): array
     {
+        // Distance scores only for orders that have coordinates
         $destinations = [];
         foreach ($orders as $order) {
             if ($order->delivery_latitude && $order->delivery_longitude) {
@@ -215,20 +245,21 @@ class RoutingEngineService
             }
         }
 
-        if (empty($destinations)) return [];
+        $distanceScores = [];
+        if (!empty($destinations)) {
+            $originPoint = [['lat' => $depot['lat'], 'lng' => $depot['lng']]];
+            $destPoints  = array_values($destinations);
+            $destIds     = array_keys($destinations);
 
-        $originPoint = [['lat' => $depot['lat'], 'lng' => $depot['lng']]];
-        $destPoints  = array_values($destinations);
-        $destIds     = array_keys($destinations);
-
-        $matrix     = $this->distanceMatrix->getMatrix($originPoint, $destPoints);
-        $distances  = [];
-        foreach ($destIds as $idx => $orderId) {
-            $distances[$orderId] = $matrix[0][$idx]['distance_m'] ?? 0;
+            $matrix    = $this->distanceMatrix->getMatrix($originPoint, $destPoints);
+            $distances = [];
+            foreach ($destIds as $idx => $orderId) {
+                $distances[$orderId] = $matrix[0][$idx]['distance_m'] ?? 0;
+            }
+            $distanceScores = $this->distanceScorer->scoreAll($distances);
         }
 
-        $distanceScores = $this->distanceScorer->scoreAll($distances);
-
+        // Waiting / window / VIP scores run for ALL orders regardless of coordinates
         $scored = [];
         foreach ($orders as $order) {
             $ds = $distanceScores[$order->id] ?? 0;
