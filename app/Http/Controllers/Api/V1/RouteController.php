@@ -232,9 +232,18 @@ class RouteController extends Controller
             ['sequence_number' => $route->assignments()->count() + 1]
         );
 
-        // If the order already has a stop on this route (e.g. in the unassigned group), move it here
+        // If the order already has a stop on this route (e.g. in the unassigned group), move it and
+        // carry over scores so the driver's stop retains its routing priority.
         $existingStop = RouteStop::where('route_id', $route->id)->where('order_id', $order->id)->first();
+        $scores = [];
         if ($existingStop) {
+            $scores = [
+                'distance_score' => $existingStop->distance_score,
+                'waiting_score'  => $existingStop->waiting_score,
+                'window_score'   => $existingStop->window_score,
+                'vip_score'      => $existingStop->vip_score,
+                'total_score'    => $existingStop->total_score,
+            ];
             $oldAssignmentId = $existingStop->route_assignment_id;
             $oldSeq = $existingStop->stop_sequence;
             $existingStop->delete();
@@ -245,13 +254,13 @@ class RouteController extends Controller
 
         $nextSeq = (int) RouteStop::where('route_assignment_id', $assignment->id)->max('stop_sequence') + 1;
 
-        RouteStop::create([
+        RouteStop::create(array_merge([
             'route_id'            => $route->id,
             'route_assignment_id' => $assignment->id,
             'order_id'            => $order->id,
             'stop_sequence'       => $nextSeq,
             'is_manually_placed'  => true,
-        ]);
+        ], $scores));
 
         if (!$existingStop) {
             $route->increment('total_stops');

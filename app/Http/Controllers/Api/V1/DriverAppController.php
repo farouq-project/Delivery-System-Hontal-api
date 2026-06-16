@@ -44,6 +44,7 @@ class DriverAppController extends Controller
             ->whereHas('route', fn($q) => $q->where('route_date', today()))
             ->with(['stops' => function ($q) {
                 $q->with('order:id,order_number,customer_name,customer_phone,delivery_address,delivery_latitude,delivery_longitude,delivery_notes,product_name,order_value,status,requested_delivery_start,requested_delivery_end')
+                  ->orderByDesc('total_score')
                   ->orderBy('stop_sequence');
             }])
             ->first();
