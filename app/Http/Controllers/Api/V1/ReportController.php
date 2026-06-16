@@ -28,17 +28,19 @@ class ReportController extends Controller
                 DB::raw("SUM(CASE WHEN payment_method = 'cash' THEN order_value ELSE 0 END) as total_cash"),
                 DB::raw("SUM(CASE WHEN payment_method = 'transfer' THEN order_value ELSE 0 END) as total_transfer"),
                 DB::raw("SUM(CASE WHEN payment_method = 'qris' THEN order_value ELSE 0 END) as total_qris"),
+                DB::raw("SUM(CASE WHEN payment_method = 'bayar_di_toko' THEN order_value ELSE 0 END) as total_bayar_di_toko"),
                 DB::raw('COUNT(*) as total_orders')
             )
             ->groupBy('cashier_name')
             ->orderBy('cashier_name')
             ->get()
             ->map(fn ($row) => [
-                'cashier_name'   => $row->cashier_name,
-                'total_cash'     => (float) $row->total_cash,
-                'total_transfer' => (float) $row->total_transfer,
-                'total_qris'     => (float) $row->total_qris,
-                'total_orders'   => (int) $row->total_orders,
+                'cashier_name'         => $row->cashier_name,
+                'total_cash'           => (float) $row->total_cash,
+                'total_transfer'       => (float) $row->total_transfer,
+                'total_qris'           => (float) $row->total_qris,
+                'total_bayar_di_toko'  => (float) $row->total_bayar_di_toko,
+                'total_orders'         => (int) $row->total_orders,
             ]);
 
         return response()->json([

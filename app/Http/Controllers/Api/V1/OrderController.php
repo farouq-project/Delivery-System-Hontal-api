@@ -71,7 +71,7 @@ class OrderController extends Controller
             'requested_delivery_end'   => 'nullable|date_format:H:i',
             'driver_id'                => 'nullable|integer|exists:drivers,id',
             'cashier_name'             => 'nullable|in:Mian,Sela,Epa,Tira',
-            'payment_method'           => 'nullable|in:cash,transfer,qris',
+            'payment_method'           => 'nullable|in:cash,transfer,qris,bayar_di_toko',
         ]);
 
         $merchantId = $request->user()->merchant_id;
@@ -217,7 +217,7 @@ class OrderController extends Controller
             'customer_name'       => 'sometimes|string|max:255',
             'customer_phone'      => 'nullable|string|max:20',
             'cashier_name'        => 'nullable|in:Mian,Sela,Epa,Tira',
-            'payment_method'      => 'nullable|in:cash,transfer,qris',
+            'payment_method'      => 'nullable|in:cash,transfer,qris,bayar_di_toko',
         ]);
 
         // Lock address fields after assignment
