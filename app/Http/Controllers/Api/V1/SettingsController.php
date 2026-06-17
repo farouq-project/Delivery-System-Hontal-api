@@ -17,13 +17,20 @@ class SettingsController extends Controller
     public function update(Request $request)
     {
         $data = $request->validate([
-            'klotter_size'   => 'sometimes|integer|min:1|max:100',
-            'order_edit_pin' => 'sometimes|string|regex:/^\d{3,6}$/',
+            'klotter_size'    => 'sometimes|integer|min:1|max:100',
+            'order_edit_pin'  => 'sometimes|string|regex:/^\d{3,6}$/',
+            'depot_address'   => 'sometimes|nullable|string|max:500',
+            'depot_latitude'  => 'sometimes|nullable|numeric|between:-90,90',
+            'depot_longitude' => 'sometimes|nullable|numeric|between:-180,180',
         ]);
 
-        // Only merchant owners may change the edit PIN
-        if (isset($data['order_edit_pin']) && $request->user()->role !== 'merchant_owner') {
-            return response()->json(['message' => 'Only the merchant owner may change the order edit PIN.'], 403);
+        $ownerOnlyFields = ['order_edit_pin', 'depot_address', 'depot_latitude', 'depot_longitude'];
+        $isOwner = in_array($request->user()->role, ['merchant_owner', 'super_admin', 'developer']);
+
+        foreach ($ownerOnlyFields as $field) {
+            if (isset($data[$field]) && !$isOwner) {
+                return response()->json(['message' => 'Only the merchant owner may change this setting.'], 403);
+            }
         }
 
         $settings = MerchantSetting::where('merchant_id', $request->user()->merchant_id)->firstOrFail();

@@ -8,6 +8,10 @@ use App\Services\Geocoding\GoogleGeocodingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Style\Font;
 
 class CustomerController extends Controller
 {
@@ -217,6 +221,41 @@ class CustomerController extends Controller
             'imported' => $imported,
             'skipped'  => $skipped,
             'errors'   => array_slice($errors, 0, 10),
+        ]);
+    }
+
+    public function downloadTemplate()
+    {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+
+        $headers = ['customer_name', 'phone', 'email', 'default_address', 'vip_level', 'notes'];
+        $sample  = ['Budi Santoso', '081234567890', 'budi@example.com', 'Jl. Sudirman No. 1 Bandung', 'standard', 'Pelanggan tetap'];
+
+        // Header row — bold + light blue background
+        foreach ($headers as $col => $header) {
+            $cell = $sheet->getCellByColumnAndRow($col + 1, 1);
+            $cell->setValue($header);
+            $sheet->getStyleByColumnAndRow($col + 1, 1)->applyFromArray([
+                'font' => ['bold' => true],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => 'FFD0E4F7']],
+            ]);
+            $sheet->getColumnDimensionByColumn($col + 1)->setAutoSize(true);
+        }
+
+        // Sample data row
+        foreach ($sample as $col => $value) {
+            $sheet->getCellByColumnAndRow($col + 1, 2)->setValue($value);
+        }
+
+        $sheet->setTitle('Customers');
+
+        $writer = new Xlsx($spreadsheet);
+
+        return response()->streamDownload(function () use ($writer) {
+            $writer->save('php://output');
+        }, 'customers_template.xlsx', [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
     }
 
