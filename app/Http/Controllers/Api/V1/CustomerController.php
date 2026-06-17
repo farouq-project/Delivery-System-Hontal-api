@@ -231,21 +231,20 @@ class CustomerController extends Controller
 
         $headers = ['customer_name', 'phone', 'email', 'default_address', 'vip_level', 'notes'];
         $sample  = ['Budi Santoso', '081234567890', 'budi@example.com', 'Jl. Sudirman No. 1 Bandung', 'standard', 'Pelanggan tetap'];
+        $cols    = ['A', 'B', 'C', 'D', 'E', 'F'];
 
-        // Header row — bold + light blue background
-        foreach ($headers as $col => $header) {
-            $cell = $sheet->getCellByColumnAndRow($col + 1, 1);
-            $cell->setValue($header);
-            $sheet->getStyleByColumnAndRow($col + 1, 1)->applyFromArray([
+        foreach ($headers as $i => $header) {
+            $col = $cols[$i];
+            $sheet->getCell($col . '1')->setValue($header);
+            $sheet->getStyle($col . '1')->applyFromArray([
                 'font' => ['bold' => true],
                 'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => 'FFD0E4F7']],
             ]);
-            $sheet->getColumnDimensionByColumn($col + 1)->setAutoSize(true);
+            $sheet->getColumnDimension($col)->setAutoSize(true);
         }
 
-        // Sample data row
-        foreach ($sample as $col => $value) {
-            $sheet->getCellByColumnAndRow($col + 1, 2)->setValue($value);
+        foreach ($sample as $i => $value) {
+            $sheet->getCell($cols[$i] . '2')->setValue($value);
         }
 
         $sheet->setTitle('Customers');
