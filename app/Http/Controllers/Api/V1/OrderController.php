@@ -241,8 +241,14 @@ class OrderController extends Controller
     {
         $this->authorizeMerchant($request, $order->merchant_id);
 
-        if (!in_array($order->status, ['pending', 'assigned', 'cancelled'])) {
-            return response()->json(['message' => 'Only pending, assigned, or cancelled orders can be deleted.'], 422);
+        $isOwner = in_array($request->user()->role, ['merchant_owner', 'super_admin', 'developer']);
+
+        // Owners may also delete delivered orders
+        $allowed = ['pending', 'assigned', 'cancelled'];
+        if ($isOwner) $allowed[] = 'delivered';
+
+        if (!in_array($order->status, $allowed)) {
+            return response()->json(['message' => 'This order cannot be deleted.'], 422);
         }
 
         RouteStop::where('order_id', $order->id)->delete();

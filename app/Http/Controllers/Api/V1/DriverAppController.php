@@ -130,14 +130,19 @@ class DriverAppController extends Controller
             'longitude'      => 'nullable|numeric',
             'recipient_name' => 'nullable|string|max:255',
             'notes'          => 'nullable|string',
+            'photo'          => 'nullable|image|max:10240',
         ]);
 
         $order = $stop->order;
 
-        // Handle photo upload
+        // Handle photo upload — continue without photo if storage fails
         $photoPath = null;
         if ($request->hasFile('photo')) {
-            $photoPath = $request->file('photo')->store('pods', 'public');
+            try {
+                $photoPath = $request->file('photo')->store('pods', 'public');
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
 
         ProofOfDelivery::updateOrCreate(
