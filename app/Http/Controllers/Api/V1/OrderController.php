@@ -25,9 +25,12 @@ class OrderController extends Controller
 
         $query = DeliveryOrder::with(['driver:id,driver_name', 'customer:id,customer_name,vip_level'])
             ->where('merchant_id', $merchantId)
-            ->when($request->status,    fn($q, $s) => $q->where('status', $s))
-            ->when($request->driver_id, fn($q, $d) => $q->where('driver_id', $d))
-            ->when($request->date,      fn($q, $d) => $q->where('requested_delivery_date', $d))
+            ->when($request->status,         fn($q, $s) => $q->where('status', $s))
+            ->when($request->driver_id,      fn($q, $d) => $q->where('driver_id', $d))
+            ->when($request->date,           fn($q, $d) => $q->where('requested_delivery_date', $d))
+            ->when($request->date_from,      fn($q, $d) => $q->where('requested_delivery_date', '>=', $d))
+            ->when($request->date_to,        fn($q, $d) => $q->where('requested_delivery_date', '<=', $d))
+            ->when($request->payment_method, fn($q, $m) => $q->where('payment_method', $m))
             ->when($request->search, fn($q, $s) => $q->where(function($q) use ($s) {
                 $q->where('customer_name', 'like', "%{$s}%")
                   ->orWhere('order_number', 'like', "%{$s}%")
@@ -220,8 +223,9 @@ class OrderController extends Controller
             'payment_method'      => 'nullable|in:cash,transfer,qris,bayar_di_toko',
         ]);
 
-        // Lock address fields after assignment
-        if (!$order->isPending()) {
+        // Lock address/customer fields only while actively assigned or in transit.
+        // Delivered orders allow correction of customer/address data.
+        if (in_array($order->status, ['assigned', 'in_transit'])) {
             unset($data['delivery_address'], $data['delivery_latitude'], $data['delivery_longitude'],
                   $data['customer_name'], $data['customer_phone']);
         }

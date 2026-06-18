@@ -166,29 +166,34 @@ class DriverAppController extends Controller
         $fromStatus = $order->status;
         $order->update(['status' => 'delivered', 'delivered_at' => now()]);
 
-        OrderStatusHistory::create([
-            'order_id'        => $order->id,
-            'from_status'     => $fromStatus,
-            'to_status'       => 'delivered',
-            'changed_by'      => $request->user()->id,
-            'changed_by_role' => 'driver',
-            'latitude'        => $request->latitude,
-            'longitude'       => $request->longitude,
-        ]);
+        // Post-save operations wrapped in try-catch: if any of these fail the
+        // delivery is already persisted, so we still return 200 to the driver.
+        try {
+            OrderStatusHistory::create([
+                'order_id'        => $order->id,
+                'from_status'     => $fromStatus,
+                'to_status'       => 'delivered',
+                'changed_by'      => $request->user()->id,
+                'changed_by_role' => 'driver',
+                'latitude'        => $request->latitude,
+                'longitude'       => $request->longitude,
+            ]);
 
-        $stop->update(['actual_arrival' => now()]);
+            $stop->update(['actual_arrival' => now()]);
 
-        $assignment = $stop->assignment;
-        $assignment->increment('completed_stops');
+            $assignment = $stop->assignment;
+            $assignment->increment('completed_stops');
 
-        // Check if route complete
-        $remaining = RouteStop::where('route_assignment_id', $assignment->id)
-            ->whereHas('order', fn($q) => $q->whereNotIn('status', ['delivered', 'failed']))
-            ->count();
+            $remaining = RouteStop::where('route_assignment_id', $assignment->id)
+                ->whereHas('order', fn($q) => $q->whereNotIn('status', ['delivered', 'failed']))
+                ->count();
 
-        if ($remaining === 0) {
-            $assignment->update(['status' => 'completed', 'actual_end_at' => now()]);
-            $driver->update(['status' => 'available']);
+            if ($remaining === 0) {
+                $assignment->update(['status' => 'completed', 'actual_end_at' => now()]);
+                $driver->update(['status' => 'available']);
+            }
+        } catch (\Throwable $e) {
+            report($e);
         }
 
         return response()->json(['message' => 'Delivery confirmed.']);
