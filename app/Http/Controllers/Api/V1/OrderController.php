@@ -423,63 +423,27 @@ class OrderController extends Controller
             ->orderBy('order_created_at')
             ->get();
 
-        $statusPriority = ['pending' => 0, 'assigned' => 1, 'in_transit' => 2, 'delivered' => 3, 'failed' => 4, 'cancelled' => 5];
-
-        $drivers = $orders->groupBy('driver_id')->map(function ($driverOrders) use ($klotterSize, $statusPriority) {
-            $driver = $driverOrders->first()->driver;
-
-            // ── 1. Sort by assigned_at (fall back to order_created_at) and
-            //       group into 30-minute dispatch batches.
-            //       Bug-fix: use a $started flag so that a null assigned_at
-            //       does NOT reset $batchStart to null and trigger a new batch
-            //       on every subsequent order.
+        $drivers = $orders->groupBy('driver_id')->map(function ($driverOrders) {
+            $driver  = $driverOrders->first()->driver;
             $getTime = fn($o) => $o->assigned_at ?? $o->order_created_at;
 
-            $sorted       = $driverOrders->sortBy(fn($o) => $getTime($o)?->timestamp ?? 0)->values();
-            $batches      = [];
-            $started      = false;
-            $batchStart   = null;
-            $currentBatch = [];
+            // One klotter per unique dispatch minute (HH:mm of assigned_at).
+            // Orders with the same dispatch minute → same klotter, regardless
+            // of count or delivery status.
+            $byMinute = $driverOrders
+                ->sortBy(fn($o) => $getTime($o)?->timestamp ?? 0)
+                ->groupBy(fn($o) => $getTime($o)?->format('H:i') ?? '—');
 
-            foreach ($sorted as $order) {
-                $t = $getTime($order);
-
-                if (!$started) {
-                    // First order always opens the first batch.
-                    $started      = true;
-                    $batchStart   = $t;
-                    $currentBatch = [$order];
-                } elseif ($t && $batchStart && $t->diffInMinutes($batchStart) > 30) {
-                    // Gap > 30 min → new dispatch batch.
-                    $batches[]    = ['time' => $batchStart, 'orders' => $currentBatch];
-                    $batchStart   = $t;
-                    $currentBatch = [$order];
-                } else {
-                    // Same batch (including null-time orders).
-                    $currentBatch[] = $order;
-                }
-            }
-            if (!empty($currentBatch)) {
-                $batches[] = ['time' => $batchStart, 'orders' => $currentBatch];
-            }
-
-            // ── 2. Within each batch: chunk by klotter size (no status grouping) ──
-            // Send the batch start time as an ISO string so the browser can
-            // render it in the user's local timezone (avoids UTC-offset bugs).
             $klotterNumber = 1;
             $allKlotters   = [];
 
-            foreach ($batches as $batch) {
-                $dispatchIso  = $batch['time']?->toISOString();
-                $batchOrders  = collect($batch['orders'])->values();
-
-                foreach ($batchOrders->chunk($klotterSize) as $chunk) {
-                    $allKlotters[] = [
-                        'klotter_number' => $klotterNumber++,
-                        'dispatch_time'  => $dispatchIso,
-                        'orders'         => $chunk->values(),
-                    ];
-                }
+            foreach ($byMinute as $klotterOrders) {
+                $allKlotters[] = [
+                    'klotter_number' => $klotterNumber++,
+                    // ISO string → browser formats in local timezone
+                    'dispatch_time'  => $getTime($klotterOrders->first())?->toISOString(),
+                    'orders'         => $klotterOrders->values(),
+                ];
             }
 
             return [
