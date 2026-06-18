@@ -423,21 +423,33 @@ class OrderController extends Controller
             ->orderBy('order_created_at')
             ->get();
 
-        $drivers = $orders->groupBy('driver_id')->map(function ($driverOrders) use ($klotterSize) {
+        $statusPriority = ['pending' => 0, 'assigned' => 1, 'in_transit' => 2, 'delivered' => 3, 'failed' => 4, 'cancelled' => 5];
+
+        $drivers = $orders->groupBy('driver_id')->map(function ($driverOrders) use ($klotterSize, $statusPriority) {
             $driver = $driverOrders->first()->driver;
 
-            $klotters = $driverOrders->values()->chunk($klotterSize)->map(function ($chunk, $index) {
-                return [
-                    'klotter_number' => $index + 1,
-                    'orders'         => $chunk->values(),
-                ];
-            })->values();
+            // Group by status (active → delivered → failed), then chunk each group by klotter_size
+            $byStatus = $driverOrders->groupBy('status')
+                ->sortBy(fn($_, $s) => $statusPriority[$s] ?? 99);
+
+            $klotterNumber = 1;
+            $allKlotters   = [];
+
+            foreach ($byStatus as $status => $statusOrders) {
+                foreach ($statusOrders->values()->chunk($klotterSize) as $chunk) {
+                    $allKlotters[] = [
+                        'klotter_number' => $klotterNumber++,
+                        'status'         => $status,
+                        'orders'         => $chunk->values(),
+                    ];
+                }
+            }
 
             return [
                 'driver_id'   => $driver?->id,
                 'driver_name' => $driver?->driver_name,
                 'total_orders'=> $driverOrders->count(),
-                'klotters'    => $klotters,
+                'klotters'    => $allKlotters,
             ];
         })->values();
 
