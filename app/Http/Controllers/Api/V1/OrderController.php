@@ -261,6 +261,27 @@ class OrderController extends Controller
         return response()->json(null, 204);
     }
 
+    public function bulkUpdateCashier(Request $request)
+    {
+        $merchantId = $request->user()->merchant_id;
+
+        if (!in_array($request->user()->role, ['merchant_owner', 'super_admin', 'developer'])) {
+            return response()->json(['message' => 'Only the merchant owner can bulk-change cashier names.'], 403);
+        }
+
+        $request->validate([
+            'order_ids'    => 'required|array|min:1',
+            'order_ids.*'  => 'integer|exists:delivery_orders,id',
+            'cashier_name' => 'required|in:Mian,Sela,Epa,Tira',
+        ]);
+
+        $updated = DeliveryOrder::where('merchant_id', $merchantId)
+            ->whereIn('id', $request->order_ids)
+            ->update(['cashier_name' => $request->cashier_name]);
+
+        return response()->json(['data' => ['updated' => $updated]]);
+    }
+
     public function bulkDelete(Request $request)
     {
         $merchantId = $request->user()->merchant_id;
