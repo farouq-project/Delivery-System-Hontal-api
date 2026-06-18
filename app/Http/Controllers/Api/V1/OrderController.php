@@ -428,20 +428,49 @@ class OrderController extends Controller
         $drivers = $orders->groupBy('driver_id')->map(function ($driverOrders) use ($klotterSize, $statusPriority) {
             $driver = $driverOrders->first()->driver;
 
-            // Group by status (active → delivered → failed), then chunk each group by klotter_size
-            $byStatus = $driverOrders->groupBy('status')
-                ->sortBy(fn($_, $s) => $statusPriority[$s] ?? 99);
+            // ── 1. Sort by assigned_at and group into dispatch batches ──────────
+            // Orders whose assigned_at is > 30 min apart from the batch start
+            // form a new batch, matching the routing engine's batch-grouping logic.
+            $sorted       = $driverOrders->sortBy(fn($o) => $o->assigned_at?->timestamp ?? PHP_INT_MAX)->values();
+            $batches      = [];
+            $batchStart   = null;
+            $currentBatch = [];
 
+            foreach ($sorted as $order) {
+                $t = $order->assigned_at;
+                if ($batchStart === null || ($t && $t->diffInMinutes($batchStart) > 30)) {
+                    if (!empty($currentBatch)) {
+                        $batches[] = ['time' => $batchStart, 'orders' => $currentBatch];
+                    }
+                    $currentBatch = [$order];
+                    $batchStart   = $t;
+                } else {
+                    $currentBatch[] = $order;
+                }
+            }
+            if (!empty($currentBatch)) {
+                $batches[] = ['time' => $batchStart, 'orders' => $currentBatch];
+            }
+
+            // ── 2. Within each batch: group by status, then chunk by size ───────
             $klotterNumber = 1;
             $allKlotters   = [];
 
-            foreach ($byStatus as $status => $statusOrders) {
-                foreach ($statusOrders->values()->chunk($klotterSize) as $chunk) {
-                    $allKlotters[] = [
-                        'klotter_number' => $klotterNumber++,
-                        'status'         => $status,
-                        'orders'         => $chunk->values(),
-                    ];
+            foreach ($batches as $batch) {
+                $dispatchTime = $batch['time']?->format('H:i') ?? '-';
+                $byStatus     = collect($batch['orders'])
+                    ->groupBy('status')
+                    ->sortBy(fn($_, $s) => $statusPriority[$s] ?? 99);
+
+                foreach ($byStatus as $status => $statusOrders) {
+                    foreach ($statusOrders->values()->chunk($klotterSize) as $chunk) {
+                        $allKlotters[] = [
+                            'klotter_number' => $klotterNumber++,
+                            'dispatch_time'  => $dispatchTime,
+                            'status'         => $status,
+                            'orders'         => $chunk->values(),
+                        ];
+                    }
                 }
             }
 
