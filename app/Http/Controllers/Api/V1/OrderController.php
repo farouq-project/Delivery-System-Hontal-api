@@ -428,23 +428,34 @@ class OrderController extends Controller
         $drivers = $orders->groupBy('driver_id')->map(function ($driverOrders) use ($klotterSize, $statusPriority) {
             $driver = $driverOrders->first()->driver;
 
-            // ── 1. Sort by assigned_at and group into dispatch batches ──────────
-            // Orders whose assigned_at is > 30 min apart from the batch start
-            // form a new batch, matching the routing engine's batch-grouping logic.
-            $sorted       = $driverOrders->sortBy(fn($o) => $o->assigned_at?->timestamp ?? PHP_INT_MAX)->values();
+            // ── 1. Sort by assigned_at (fall back to order_created_at) and
+            //       group into 30-minute dispatch batches.
+            //       Bug-fix: use a $started flag so that a null assigned_at
+            //       does NOT reset $batchStart to null and trigger a new batch
+            //       on every subsequent order.
+            $getTime = fn($o) => $o->assigned_at ?? $o->order_created_at;
+
+            $sorted       = $driverOrders->sortBy(fn($o) => $getTime($o)?->timestamp ?? 0)->values();
             $batches      = [];
+            $started      = false;
             $batchStart   = null;
             $currentBatch = [];
 
             foreach ($sorted as $order) {
-                $t = $order->assigned_at;
-                if ($batchStart === null || ($t && $t->diffInMinutes($batchStart) > 30)) {
-                    if (!empty($currentBatch)) {
-                        $batches[] = ['time' => $batchStart, 'orders' => $currentBatch];
-                    }
-                    $currentBatch = [$order];
+                $t = $getTime($order);
+
+                if (!$started) {
+                    // First order always opens the first batch.
+                    $started      = true;
                     $batchStart   = $t;
+                    $currentBatch = [$order];
+                } elseif ($t && $batchStart && $t->diffInMinutes($batchStart) > 30) {
+                    // Gap > 30 min → new dispatch batch.
+                    $batches[]    = ['time' => $batchStart, 'orders' => $currentBatch];
+                    $batchStart   = $t;
+                    $currentBatch = [$order];
                 } else {
+                    // Same batch (including null-time orders).
                     $currentBatch[] = $order;
                 }
             }
