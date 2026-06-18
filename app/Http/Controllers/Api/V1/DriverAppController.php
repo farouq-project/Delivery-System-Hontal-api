@@ -135,7 +135,7 @@ class DriverAppController extends Controller
             'longitude'      => 'nullable|numeric',
             'recipient_name' => 'nullable|string|max:255',
             'notes'          => 'nullable|string',
-            'photo'          => 'nullable|image|max:10240',
+            'photo'          => 'nullable|file|max:20480',
         ]);
 
         $order = $stop->order;
