@@ -58,7 +58,7 @@ class OrderController extends Controller
             'customer_id'              => 'nullable|integer',
             'customer_name'            => 'nullable|string|max:255',
             'customer_phone'           => 'nullable|string|max:20',
-            'product_name'             => 'nullable|string|max:255',
+            'product_name'             => 'nullable|string',
             'product_notes'            => 'nullable|string',
             'items'                    => 'nullable|array|min:1',
             'items.*.name'             => 'required_with:items|string|max:255',
@@ -202,7 +202,7 @@ class OrderController extends Controller
         $this->normalizeTimeFields($request);
 
         $data = $request->validate([
-            'product_name'             => 'sometimes|string|max:255',
+            'product_name'             => 'sometimes|string',
             'product_notes'            => 'nullable|string',
             'items'                    => 'nullable|array|min:1',
             'items.*.name'             => 'required_with:items|string|max:255',
