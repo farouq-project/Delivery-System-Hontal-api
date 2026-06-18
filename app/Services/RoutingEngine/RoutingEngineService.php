@@ -84,6 +84,7 @@ class RoutingEngineService
                 'window_score'  => $scoredOrders[$o->id]['window_score']   ?? 'N/A',
                 'vip_score'     => $scoredOrders[$o->id]['vip_score']      ?? 'N/A',
                 'total_score'   => $scoredOrders[$o->id]['total_score']    ?? 'N/A',
+                'batch'         => $scoredOrders[$o->id]['batch_number']   ?? 'N/A',
             ])->values()->toArray(),
         ]);
 
@@ -273,7 +274,25 @@ class RoutingEngineService
                 'window_score'   => $wn,
                 'vip_score'      => $vs,
                 'total_score'    => $ds + $ws + $wn + $vs,
+                'batch_number'   => 1, // overridden below
             ];
+        }
+
+        // Batch grouping — orders that arrived more than 30 minutes after the
+        // earliest order in this route are batch 2 and will always be sequenced
+        // AFTER batch-1 orders, regardless of VIP/window/distance scores.
+        // This prevents a 17:00 platinum order from jumping ahead of a 14:50 batch.
+        if ($orders->count() > 1) {
+            $earliest = $orders
+                ->map(fn($o) => $o->order_created_at ?? $o->created_at)
+                ->sortBy(fn($dt) => $dt->timestamp)
+                ->first();
+
+            foreach ($orders as $order) {
+                $createdAt        = $order->order_created_at ?? $order->created_at;
+                $minutesSinceFirst = (int) $earliest->diffInMinutes($createdAt); // always >= 0
+                $scored[$order->id]['batch_number'] = $minutesSinceFirst > 30 ? 2 : 1;
+            }
         }
 
         return $scored;
@@ -305,15 +324,23 @@ class RoutingEngineService
                     'lat'         => $order->delivery_latitude,
                     'lng'         => $order->delivery_longitude,
                     'total_score' => $scoredOrders[$order->id]['total_score'] ?? 0,
+                    'batch_number'=> $scoredOrders[$order->id]['batch_number'] ?? 1,
                 ];
             }
         }
 
-        // Phase 1: Nearest neighbor
-        $orderedIds = $this->nnSolver->solve($driverPos, $stopsData, $matrix, $indexMap);
+        // Split by batch: batch-1 orders (≤30 min from earliest) always go first;
+        // batch-2 orders are solved separately and appended after.
+        $batch1 = array_filter($stopsData, fn($s) => ($s['batch_number'] ?? 1) === 1);
+        $batch2 = array_filter($stopsData, fn($s) => ($s['batch_number'] ?? 1) === 2);
 
-        // Phase 2: 2-opt improvement
-        $orderedIds = $this->twoOpt->improve($orderedIds, $matrix, $indexMap);
+        $orderedIds = [];
+        foreach ([[$batch1, $driverPos], [$batch2, $driverPos]] as [$batchStops, $startPos]) {
+            if (empty($batchStops)) continue;
+            $batchOrdered = $this->nnSolver->solve($startPos, $batchStops, $matrix, $indexMap);
+            $batchOrdered = $this->twoOpt->improve($batchOrdered, $matrix, $indexMap);
+            $orderedIds   = [...$orderedIds, ...$batchOrdered];
+        }
 
         // Calculate ETAs
         $etaData      = [];
