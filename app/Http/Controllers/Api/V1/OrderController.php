@@ -463,25 +463,22 @@ class OrderController extends Controller
                 $batches[] = ['time' => $batchStart, 'orders' => $currentBatch];
             }
 
-            // ── 2. Within each batch: group by status, then chunk by size ───────
+            // ── 2. Within each batch: chunk by klotter size (no status grouping) ──
+            // Send the batch start time as an ISO string so the browser can
+            // render it in the user's local timezone (avoids UTC-offset bugs).
             $klotterNumber = 1;
             $allKlotters   = [];
 
             foreach ($batches as $batch) {
-                $dispatchTime = $batch['time']?->format('H:i') ?? '-';
-                $byStatus     = collect($batch['orders'])
-                    ->groupBy('status')
-                    ->sortBy(fn($_, $s) => $statusPriority[$s] ?? 99);
+                $dispatchIso  = $batch['time']?->toISOString();
+                $batchOrders  = collect($batch['orders'])->values();
 
-                foreach ($byStatus as $status => $statusOrders) {
-                    foreach ($statusOrders->values()->chunk($klotterSize) as $chunk) {
-                        $allKlotters[] = [
-                            'klotter_number' => $klotterNumber++,
-                            'dispatch_time'  => $dispatchTime,
-                            'status'         => $status,
-                            'orders'         => $chunk->values(),
-                        ];
-                    }
+                foreach ($batchOrders->chunk($klotterSize) as $chunk) {
+                    $allKlotters[] = [
+                        'klotter_number' => $klotterNumber++,
+                        'dispatch_time'  => $dispatchIso,
+                        'orders'         => $chunk->values(),
+                    ];
                 }
             }
 
