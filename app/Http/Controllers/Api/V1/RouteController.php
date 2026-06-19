@@ -97,6 +97,21 @@ class RouteController extends Controller
         return response()->json(null, 204);
     }
 
+    public function destroy(Request $request, Route $route)
+    {
+        $this->authorizeMerchant($request, $route->merchant_id);
+
+        if (!in_array($request->user()->role, ['merchant_owner', 'super_admin', 'developer'])) {
+            return response()->json(['message' => 'Only the merchant owner can delete a dispatch.'], 403);
+        }
+
+        // Delete without touching order statuses — orders keep their current state.
+        // Use Reset Dispatch to also return orders to pending.
+        $route->delete();
+
+        return response()->json(null, 204);
+    }
+
     public function reoptimize(Request $request, Route $route)
     {
         $this->authorizeMerchant($request, $route->merchant_id);

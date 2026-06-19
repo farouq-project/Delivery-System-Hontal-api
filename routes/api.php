@@ -49,6 +49,7 @@ Route::prefix('v1')->group(function () {
         Route::get('orders/klotters',            [OrderController::class, 'klotters']);
         Route::post('orders/bulk-assign',          [OrderController::class, 'bulkAssign']);
         Route::post('orders/bulk-delete',          [OrderController::class, 'bulkDelete']);
+        Route::post('orders/bulk-unassign',        [OrderController::class, 'bulkUnassign']);
         Route::post('orders/bulk-update-cashier',  [OrderController::class, 'bulkUpdateCashier']);
         Route::post('orders/{order}/assign',  [OrderController::class, 'assign']);
         Route::post('orders/{order}/unassign', [OrderController::class, 'unassign']);

@@ -261,6 +261,54 @@ class OrderController extends Controller
         return response()->json(null, 204);
     }
 
+    public function bulkUnassign(Request $request)
+    {
+        $merchantId = $request->user()->merchant_id;
+
+        $request->validate([
+            'order_ids'   => 'required|array|min:1',
+            'order_ids.*' => 'integer|exists:delivery_orders,id',
+        ]);
+
+        $orders = DeliveryOrder::where('merchant_id', $merchantId)
+            ->whereIn('id', $request->order_ids)
+            ->whereNotNull('driver_id')
+            ->whereNotIn('status', ['delivered', 'failed', 'cancelled'])
+            ->get();
+
+        foreach ($orders as $order) {
+            $fromStatus       = $order->status;
+            $previousDriverId = $order->driver_id;
+
+            $order->update(['driver_id' => null, 'status' => 'pending', 'assigned_at' => null, 'route_sequence' => null]);
+
+            $stop = RouteStop::where('order_id', $order->id)->first();
+            if ($stop) {
+                $route = $stop->route;
+                RouteStop::where('route_assignment_id', $stop->route_assignment_id)
+                    ->where('stop_sequence', '>', $stop->stop_sequence)
+                    ->decrement('stop_sequence');
+                $stop->delete();
+                $route->decrement('total_stops');
+            }
+
+            try {
+                OrderStatusHistory::create([
+                    'order_id'        => $order->id,
+                    'from_status'     => $fromStatus,
+                    'to_status'       => 'pending',
+                    'changed_by'      => $request->user()->id,
+                    'changed_by_role' => $request->user()->role,
+                    'notes'           => "Bulk unassigned from driver #{$previousDriverId}",
+                ]);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+
+        return response()->json(['data' => ['unassigned' => $orders->count()]]);
+    }
+
     public function bulkUpdateCashier(Request $request)
     {
         $merchantId = $request->user()->merchant_id;
