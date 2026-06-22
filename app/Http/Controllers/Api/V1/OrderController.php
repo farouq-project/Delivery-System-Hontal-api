@@ -223,9 +223,9 @@ class OrderController extends Controller
             'payment_method'      => 'nullable|in:cash,transfer,qris,bayar_di_toko',
         ]);
 
-        // Lock address/customer fields only while actively assigned or in transit.
-        // Delivered orders allow correction of customer/address data.
-        if (in_array($order->status, ['assigned', 'in_transit'])) {
+        // Lock address/customer fields only while the driver is actively in transit.
+        // Assigned and delivered orders allow PIN-protected correction by owner/dispatcher.
+        if ($order->status === 'in_transit') {
             unset($data['delivery_address'], $data['delivery_latitude'], $data['delivery_longitude'],
                   $data['customer_name'], $data['customer_phone']);
         }
