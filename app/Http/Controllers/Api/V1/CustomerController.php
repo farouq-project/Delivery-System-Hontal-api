@@ -33,9 +33,18 @@ class CustomerController extends Controller
             ->when($request->vip_level, fn($q, $v) => $q->where('vip_level', $v))
             ->when($request->active !== null, fn($q) => $q->where('is_active', filter_var($request->active, FILTER_VALIDATE_BOOLEAN)))
             ->when($request->has_coords === '1', fn($q) => $q->whereNotNull('default_latitude'))
-            ->when($request->has_coords === '0', fn($q) => $q->whereNull('default_latitude'))
-            ->orderByRaw("CASE WHEN {$sortBy} IS NULL THEN 1 ELSE 0 END")  // NULLs last
-            ->orderBy($sortBy, $sortDir);
+            ->when($request->has_coords === '0', fn($q) => $q->whereNull('default_latitude'));
+
+        // For numeric coordinate columns, always put NULLs last then sort by value.
+        // Use DB::raw with explicit direction so MySQL uses an index properly.
+        $numericSort = in_array($sortBy, ['default_latitude', 'default_longitude']);
+        if ($numericSort) {
+            // `col IS NULL` evaluates to 0 (non-null) or 1 (null) — sort ASC puts NULLs last
+            $query->orderByRaw("`{$sortBy}` IS NULL ASC")
+                  ->orderBy($sortBy, $sortDir);
+        } else {
+            $query->orderBy($sortBy, $sortDir);
+        }
 
         return response()->json($query->paginate($request->per_page ?? 25));
     }
