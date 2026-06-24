@@ -21,6 +21,10 @@ class CustomerController extends Controller
     {
         $merchantId = $request->user()->merchant_id;
 
+        $allowedSorts = ['customer_name', 'default_latitude', 'default_longitude', 'vip_level'];
+        $sortBy  = in_array($request->sort_by, $allowedSorts) ? $request->sort_by : 'customer_name';
+        $sortDir = $request->sort_dir === 'desc' ? 'desc' : 'asc';
+
         $query = Customer::where('merchant_id', $merchantId)
             ->when($request->search, fn($q, $s) => $q->where(function($q) use ($s) {
                 $q->where('customer_name', 'like', "%{$s}%")
@@ -28,7 +32,10 @@ class CustomerController extends Controller
             }))
             ->when($request->vip_level, fn($q, $v) => $q->where('vip_level', $v))
             ->when($request->active !== null, fn($q) => $q->where('is_active', filter_var($request->active, FILTER_VALIDATE_BOOLEAN)))
-            ->orderBy('customer_name');
+            ->when($request->has_coords === '1', fn($q) => $q->whereNotNull('default_latitude'))
+            ->when($request->has_coords === '0', fn($q) => $q->whereNull('default_latitude'))
+            ->orderByRaw("CASE WHEN {$sortBy} IS NULL THEN 1 ELSE 0 END")  // NULLs last
+            ->orderBy($sortBy, $sortDir);
 
         return response()->json($query->paginate($request->per_page ?? 25));
     }
