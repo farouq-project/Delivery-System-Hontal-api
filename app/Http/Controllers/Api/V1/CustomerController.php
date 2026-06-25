@@ -116,6 +116,42 @@ class CustomerController extends Controller
         return response()->json(['data' => $customer->fresh()]);
     }
 
+    public function deduplicate(Request $request)
+    {
+        $merchantId = $request->user()->merchant_id;
+
+        // Find names with more than one record
+        $duplicateNames = Customer::where('merchant_id', $merchantId)
+            ->select('customer_name')
+            ->groupBy('customer_name')
+            ->havingRaw('COUNT(*) > 1')
+            ->pluck('customer_name');
+
+        if ($duplicateNames->isEmpty()) {
+            return response()->json(['data' => ['deleted' => 0, 'groups' => 0]]);
+        }
+
+        $deleted = 0;
+
+        foreach ($duplicateNames as $name) {
+            // Keep the record with the most orders (most history), then the oldest id
+            $dupes = Customer::where('merchant_id', $merchantId)
+                ->where('customer_name', $name)
+                ->orderByDesc('total_orders')
+                ->orderBy('id')
+                ->get();
+
+            $keepId = $dupes->first()->id;
+
+            $deleted += Customer::where('merchant_id', $merchantId)
+                ->where('customer_name', $name)
+                ->where('id', '!=', $keepId)
+                ->delete();
+        }
+
+        return response()->json(['data' => ['deleted' => $deleted, 'groups' => $duplicateNames->count()]]);
+    }
+
     public function destroy(Request $request, Customer $customer)
     {
         $this->authorizeMerchant($request, $customer->merchant_id);

@@ -32,10 +32,11 @@ Route::prefix('v1')->group(function () {
         Route::post('geocode/address', [OrderController::class, 'geocode']);
 
         // Customers
-        Route::get('customers/search',         [CustomerController::class, 'search']);
-        Route::get('customers/template',       [CustomerController::class, 'downloadTemplate']);
-        Route::post('customers/bulk-delete',   [CustomerController::class, 'bulkDelete']);
-        Route::post('customers/import',        [CustomerController::class, 'import']);
+        Route::get('customers/search',           [CustomerController::class, 'search']);
+        Route::get('customers/template',         [CustomerController::class, 'downloadTemplate']);
+        Route::post('customers/bulk-delete',     [CustomerController::class, 'bulkDelete']);
+        Route::post('customers/deduplicate',     [CustomerController::class, 'deduplicate']);
+        Route::post('customers/import',          [CustomerController::class, 'import']);
         Route::apiResource('customers', CustomerController::class);
 
         // Drivers
