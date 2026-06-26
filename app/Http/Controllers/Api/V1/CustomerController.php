@@ -21,11 +21,28 @@ class CustomerController extends Controller
     {
         $merchantId = $request->user()->merchant_id;
 
-        $allowedSorts = ['customer_name', 'default_latitude', 'default_longitude', 'vip_level'];
+        $allowedSorts = ['customer_name', 'default_latitude', 'default_longitude', 'vip_level', 'total_belanja', 'avg_belanja_per_month'];
         $sortBy  = in_array($request->sort_by, $allowedSorts) ? $request->sort_by : 'customer_name';
         $sortDir = $request->sort_dir === 'desc' ? 'desc' : 'asc';
 
         $query = Customer::where('merchant_id', $merchantId)
+            ->select('customers.*')
+            // Total of all non-cancelled/failed orders
+            ->selectRaw(
+                '(SELECT COALESCE(SUM(order_value),0) FROM delivery_orders
+                  WHERE customer_id=customers.id
+                  AND status NOT IN ("cancelled","failed")
+                  AND deleted_at IS NULL) AS total_belanja'
+            )
+            // Average per calendar month since the customer record was created
+            ->selectRaw(
+                '(SELECT COALESCE(SUM(order_value),0) FROM delivery_orders
+                  WHERE customer_id=customers.id
+                  AND status NOT IN ("cancelled","failed")
+                  AND deleted_at IS NULL)
+                 / GREATEST(1, TIMESTAMPDIFF(MONTH, customers.created_at, NOW()) + 1)
+                 AS avg_belanja_per_month'
+            )
             ->when($request->search, fn($q, $s) => $q->where(function($q) use ($s) {
                 $q->where('customer_name', 'like', "%{$s}%")
                   ->orWhere('phone', 'like', "%{$s}%");
@@ -35,13 +52,9 @@ class CustomerController extends Controller
             ->when($request->has_coords === '1', fn($q) => $q->whereNotNull('default_latitude'))
             ->when($request->has_coords === '0', fn($q) => $q->whereNull('default_latitude'));
 
-        // For numeric coordinate columns, always put NULLs last then sort by value.
-        // Use DB::raw with explicit direction so MySQL uses an index properly.
-        $numericSort = in_array($sortBy, ['default_latitude', 'default_longitude']);
-        if ($numericSort) {
-            // `col IS NULL` evaluates to 0 (non-null) or 1 (null) — sort ASC puts NULLs last
-            $query->orderByRaw("`{$sortBy}` IS NULL ASC")
-                  ->orderBy($sortBy, $sortDir);
+        // Coordinates need NULL-last handling; belanja columns always have a value (0 via COALESCE)
+        if (in_array($sortBy, ['default_latitude', 'default_longitude'])) {
+            $query->orderByRaw("`{$sortBy}` IS NULL ASC")->orderBy($sortBy, $sortDir);
         } else {
             $query->orderBy($sortBy, $sortDir);
         }
