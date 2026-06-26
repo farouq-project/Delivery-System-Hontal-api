@@ -29,19 +29,19 @@ class CustomerController extends Controller
             ->select('customers.*')
             // Total of all non-cancelled/failed orders
             ->selectRaw(
-                '(SELECT COALESCE(SUM(order_value),0) FROM delivery_orders
+                "(SELECT COALESCE(SUM(order_value),0) FROM delivery_orders
                   WHERE customer_id=customers.id
-                  AND status NOT IN ("cancelled","failed")
-                  AND deleted_at IS NULL) AS total_belanja'
+                  AND status NOT IN ('cancelled','failed')
+                  AND deleted_at IS NULL) AS total_belanja"
             )
             // Average per calendar month since the customer record was created
             ->selectRaw(
-                '(SELECT COALESCE(SUM(order_value),0) FROM delivery_orders
+                "(SELECT COALESCE(SUM(order_value),0) FROM delivery_orders
                   WHERE customer_id=customers.id
-                  AND status NOT IN ("cancelled","failed")
+                  AND status NOT IN ('cancelled','failed')
                   AND deleted_at IS NULL)
                  / GREATEST(1, TIMESTAMPDIFF(MONTH, customers.created_at, NOW()) + 1)
-                 AS avg_belanja_per_month'
+                 AS avg_belanja_per_month"
             )
             ->when($request->search, fn($q, $s) => $q->where(function($q) use ($s) {
                 $q->where('customer_name', 'like', "%{$s}%")
