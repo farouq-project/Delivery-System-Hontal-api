@@ -143,6 +143,12 @@ class CustomerController extends Controller
             'is_active'         => 'nullable|boolean',
         ]);
 
+        // Auto-detect cluster from name when cluster is explicitly sent as empty/null
+        if (array_key_exists('cluster', $data) && empty($data['cluster'])) {
+            $name = $data['customer_name'] ?? $customer->customer_name;
+            $data['cluster'] = $this->detectCluster($name);
+        }
+
         // Re-geocode if address changed and no new coords provided
         if (isset($data['default_address']) && empty($data['default_latitude'])) {
             $geo = $this->geocoder->geocode($data['default_address']);
@@ -154,6 +160,23 @@ class CustomerController extends Controller
 
         $customer->update($data);
         return response()->json(['data' => $customer->fresh()]);
+    }
+
+    public function bulkUpdateCluster(Request $request)
+    {
+        $merchantId = $request->user()->merchant_id;
+
+        $request->validate([
+            'customer_ids'   => 'required|array|min:1',
+            'customer_ids.*' => 'integer|exists:customers,id',
+            'cluster'        => 'required|string|max:50',
+        ]);
+
+        $updated = Customer::where('merchant_id', $merchantId)
+            ->whereIn('id', $request->customer_ids)
+            ->update(['cluster' => $request->cluster]);
+
+        return response()->json(['data' => ['updated' => $updated]]);
     }
 
     public function deduplicate(Request $request)

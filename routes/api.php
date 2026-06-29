@@ -34,8 +34,9 @@ Route::prefix('v1')->group(function () {
         // Customers
         Route::get('customers/search',           [CustomerController::class, 'search']);
         Route::get('customers/template',         [CustomerController::class, 'downloadTemplate']);
-        Route::post('customers/bulk-delete',     [CustomerController::class, 'bulkDelete']);
-        Route::post('customers/deduplicate',     [CustomerController::class, 'deduplicate']);
+        Route::post('customers/bulk-delete',          [CustomerController::class, 'bulkDelete']);
+        Route::post('customers/bulk-update-cluster',  [CustomerController::class, 'bulkUpdateCluster']);
+        Route::post('customers/deduplicate',          [CustomerController::class, 'deduplicate']);
         Route::post('customers/import',          [CustomerController::class, 'import']);
         Route::apiResource('customers', CustomerController::class);
 
