@@ -97,6 +97,35 @@ class RouteController extends Controller
         return response()->json(null, 204);
     }
 
+    public function resetUnassigned(Request $request, Route $route)
+    {
+        $this->authorizeMerchant($request, $route->merchant_id);
+
+        // Only clear the null-driver (unassigned) assignment — leaves driver-assigned stops intact
+        $nullAssignment = RouteAssignment::where('route_id', $route->id)
+            ->whereNull('driver_id')
+            ->first();
+
+        if ($nullAssignment) {
+            $orderIds = RouteStop::where('route_assignment_id', $nullAssignment->id)->pluck('order_id');
+
+            // Clear routing data so orders appear unsequenced (eligible for re-routing)
+            DeliveryOrder::whereIn('id', $orderIds)
+                ->update(['route_sequence' => null]);
+
+            RouteStop::where('route_assignment_id', $nullAssignment->id)->delete();
+            $route->decrement('total_stops', $orderIds->count());
+            $nullAssignment->delete();
+        }
+
+        // Delete the route record if no assignments remain
+        if ($route->assignments()->count() === 0) {
+            $route->delete();
+        }
+
+        return response()->json(null, 204);
+    }
+
     public function destroy(Request $request, Route $route)
     {
         $this->authorizeMerchant($request, $route->merchant_id);

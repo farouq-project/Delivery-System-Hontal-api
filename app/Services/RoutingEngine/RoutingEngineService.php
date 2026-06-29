@@ -291,7 +291,7 @@ class RoutingEngineService
             foreach ($orders as $order) {
                 $createdAt        = $order->order_created_at ?? $order->created_at;
                 $minutesSinceFirst = (int) $earliest->diffInMinutes($createdAt); // always >= 0
-                $scored[$order->id]['batch_number'] = $minutesSinceFirst > 30 ? 2 : 1;
+                $scored[$order->id]['batch_number'] = $minutesSinceFirst > 60 ? 2 : 1;
             }
         }
 

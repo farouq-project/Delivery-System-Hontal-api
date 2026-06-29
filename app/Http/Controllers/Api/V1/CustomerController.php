@@ -17,6 +17,22 @@ class CustomerController extends Controller
 {
     public function __construct(private GoogleGeocodingService $geocoder) {}
 
+    private const CLUSTERS = [
+        'Banyak','Candra','Guru','Jingga','Kama','Kidang','Kumala','Larang',
+        'Loka','Mayang','Naga','Naya','Pita','Purba','Rambut','Ratna',
+        'Sima','Subang','Taru','Teja','Titis','Wangsa',
+    ];
+
+    private function detectCluster(string $name): ?string
+    {
+        foreach (self::CLUSTERS as $cluster) {
+            if (stripos($name, $cluster) !== false) {
+                return $cluster;
+            }
+        }
+        return null;
+    }
+
     public function index(Request $request)
     {
         $merchantId = $request->user()->merchant_id;
@@ -50,7 +66,9 @@ class CustomerController extends Controller
             ->when($request->vip_level, fn($q, $v) => $q->where('vip_level', $v))
             ->when($request->active !== null, fn($q) => $q->where('is_active', filter_var($request->active, FILTER_VALIDATE_BOOLEAN)))
             ->when($request->has_coords === '1', fn($q) => $q->whereNotNull('default_latitude'))
-            ->when($request->has_coords === '0', fn($q) => $q->whereNull('default_latitude'));
+            ->when($request->has_coords === '0', fn($q) => $q->whereNull('default_latitude'))
+            ->when($request->cluster_filter === '1', fn($q) => $q->whereNotNull('cluster'))
+            ->when($request->cluster_filter === '0', fn($q) => $q->whereNull('cluster'));
 
         // Coordinates need NULL-last handling; belanja columns always have a value (0 via COALESCE)
         if (in_array($sortBy, ['default_latitude', 'default_longitude'])) {
@@ -72,8 +90,14 @@ class CustomerController extends Controller
             'default_latitude'   => 'nullable|numeric|between:-90,90',
             'default_longitude'  => 'nullable|numeric|between:-180,180',
             'vip_level'          => 'nullable|in:standard,silver,gold,platinum',
+            'cluster'            => 'nullable|string|max:50',
             'notes'              => 'nullable|string',
         ]);
+
+        // Auto-detect cluster from name if not provided
+        if (empty($data['cluster']) && !empty($data['customer_name'])) {
+            $data['cluster'] = $this->detectCluster($data['customer_name']);
+        }
 
         // Auto-geocode if no coordinates provided
         if (empty($data['default_latitude']) && !empty($data['default_address'])) {
@@ -112,6 +136,7 @@ class CustomerController extends Controller
             'default_latitude'  => 'nullable|numeric|between:-90,90',
             'default_longitude' => 'nullable|numeric|between:-180,180',
             'vip_level'         => 'nullable|in:standard,silver,gold,platinum',
+            'cluster'           => 'nullable|string|max:50',
             'notes'             => 'nullable|string',
             'is_active'         => 'nullable|boolean',
         ]);
@@ -272,6 +297,7 @@ class CustomerController extends Controller
                     'default_latitude'  => $latitude,
                     'default_longitude' => $longitude,
                     'vip_level'         => $vipLevel,
+                    'cluster'           => $get('cluster') ?: $this->detectCluster($customerName),
                     'notes'             => $get('notes') ?: null,
                 ]);
                 $imported++;

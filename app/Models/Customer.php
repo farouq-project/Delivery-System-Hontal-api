@@ -13,7 +13,7 @@ class Customer extends Model
     protected $fillable = [
         'ulid', 'merchant_id', 'customer_name', 'phone', 'email',
         'default_address', 'default_latitude', 'default_longitude',
-        'vip_level', 'notes', 'total_orders', 'last_order_at', 'is_active',
+        'vip_level', 'cluster', 'notes', 'total_orders', 'last_order_at', 'is_active',
     ];
 
     protected $casts = [
