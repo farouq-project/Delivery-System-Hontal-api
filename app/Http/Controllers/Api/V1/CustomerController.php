@@ -23,14 +23,14 @@ class CustomerController extends Controller
         'Sima','Subang','Taru','Teja','Titis','Wangsa',
     ];
 
-    private function detectCluster(string $name): ?string
+    private function detectCluster(string $name): string
     {
         foreach (self::CLUSTERS as $cluster) {
             if (stripos($name, $cluster) !== false) {
                 return $cluster;
             }
         }
-        return null;
+        return 'no cluster';
     }
 
     public function index(Request $request)
@@ -67,8 +67,10 @@ class CustomerController extends Controller
             ->when($request->active !== null, fn($q) => $q->where('is_active', filter_var($request->active, FILTER_VALIDATE_BOOLEAN)))
             ->when($request->has_coords === '1', fn($q) => $q->whereNotNull('default_latitude'))
             ->when($request->has_coords === '0', fn($q) => $q->whereNull('default_latitude'))
-            ->when($request->cluster_filter === '1', fn($q) => $q->whereNotNull('cluster'))
-            ->when($request->cluster_filter === '0', fn($q) => $q->whereNull('cluster'));
+            // cluster_filter=1 → named cluster (not null, not 'no cluster')
+            // cluster_filter=0 → explicitly 'no cluster'
+            ->when($request->cluster_filter === '1', fn($q) => $q->whereNotNull('cluster')->where('cluster', '!=', 'no cluster'))
+            ->when($request->cluster_filter === '0', fn($q) => $q->where('cluster', 'no cluster'));
 
         // Coordinates need NULL-last handling; belanja columns always have a value (0 via COALESCE)
         if (in_array($sortBy, ['default_latitude', 'default_longitude'])) {
@@ -94,8 +96,8 @@ class CustomerController extends Controller
             'notes'              => 'nullable|string',
         ]);
 
-        // Auto-detect cluster from name if not provided
-        if (empty($data['cluster']) && !empty($data['customer_name'])) {
+        // Always auto-detect cluster from name (returns named cluster or 'no cluster')
+        if (empty($data['cluster'])) {
             $data['cluster'] = $this->detectCluster($data['customer_name']);
         }
 
