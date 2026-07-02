@@ -13,17 +13,22 @@ class NearestNeighborSolver
      * @param array $indexMap    [order_id => matrix_index]
      * @return array             Ordered list of order_ids
      */
-    public function solve(array $start, array $stops, array $distMatrix, array $indexMap): array
+    /**
+     * @param bool $groupAffinity  When true, same-group stops get a 40% effective-distance
+     *                             discount. Pass false for batch-2 (>60 min) orders so they
+     *                             route purely by distance + score.
+     */
+    public function solve(array $start, array $stops, array $distMatrix, array $indexMap, bool $groupAffinity = true): array
     {
         if (empty($stops)) return [];
 
-        $ordered        = [];
-        $remaining      = $stops;
-        $currentIdx     = 0;   // depot/start is index 0
-        $currentCluster = null; // track cluster of last visited stop
+        $ordered         = [];
+        $remaining       = $stops;
+        $currentIdx      = 0;    // depot/start is index 0
+        $currentGroupKey = null; // group key of the last visited stop
 
         while (!empty($remaining)) {
-            $bestOrderId  = null;
+            $bestOrderId   = null;
             $bestEffective = PHP_FLOAT_MAX;
 
             foreach ($remaining as $orderId => $stop) {
@@ -34,18 +39,13 @@ class NearestNeighborSolver
                 $scoreBoost = ($stop['total_score'] ?? 0) / 100.0;
                 $effective  = $raw / (1 + $scoreBoost);
 
-                // Same-cluster affinity: give a 40% discount when the candidate
-                // is in the same geographic cluster as the current stop.
-                // This keeps Jingga stops together, Banyak stops together, etc.
-                // 'no cluster' is excluded — only named clusters trigger grouping.
-                $stopCluster = $stop['cluster'] ?? null;
-                if (
-                    $currentCluster &&
-                    $stopCluster &&
-                    $stopCluster !== 'no cluster' &&
-                    $currentCluster === $stopCluster
-                ) {
-                    $effective *= 0.6;
+                // Group affinity (batch-1 only): 40% discount for same group_key.
+                // group_key is the named cluster if set, else first 6 chars of name.
+                if ($groupAffinity && $currentGroupKey !== null) {
+                    $stopGroupKey = $stop['group_key'] ?? null;
+                    if ($stopGroupKey !== null && $stopGroupKey === $currentGroupKey) {
+                        $effective *= 0.6;
+                    }
                 }
 
                 if ($effective < $bestEffective) {
@@ -56,9 +56,9 @@ class NearestNeighborSolver
 
             if ($bestOrderId === null) break;
 
-            $ordered[]      = $bestOrderId;
-            $currentIdx     = $indexMap[$bestOrderId];
-            $currentCluster = $stops[$bestOrderId]['cluster'] ?? null;
+            $ordered[]       = $bestOrderId;
+            $currentIdx      = $indexMap[$bestOrderId];
+            $currentGroupKey = $stops[$bestOrderId]['group_key'] ?? null;
             unset($remaining[$bestOrderId]);
         }
 

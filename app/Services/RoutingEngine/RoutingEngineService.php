@@ -320,25 +320,34 @@ class RoutingEngineService
         $stopsData = [];
         foreach ($orders as $order) {
             if (isset($indexMap[$order->id])) {
+                // group_key: named cluster (if set) else first 6 chars of customer name.
+                // Used by NearestNeighbor to keep same-area stops together (batch 1 only).
+                $cluster    = $order->customer?->cluster ?? null;
+                $namePrefix = strtolower(trim(substr($order->customer_name ?? '', 0, 6)));
+                $groupKey   = ($cluster && $cluster !== 'no cluster')
+                    ? strtolower($cluster)
+                    : ($namePrefix ?: null);
+
                 $stopsData[$order->id] = [
                     'lat'          => $order->delivery_latitude,
                     'lng'          => $order->delivery_longitude,
                     'total_score'  => $scoredOrders[$order->id]['total_score'] ?? 0,
                     'batch_number' => $scoredOrders[$order->id]['batch_number'] ?? 1,
-                    'cluster'      => $order->customer?->cluster ?? null,
+                    'group_key'    => $groupKey,
                 ];
             }
         }
 
-        // Split by batch: batch-1 orders (≤30 min from earliest) always go first;
-        // batch-2 orders are solved separately and appended after.
+        // Batch-1 (≤60 min from earliest) runs with group affinity ON — same-area
+        // stops get a 40% effective-distance discount to stay clustered together.
+        // Batch-2 (>60 min) runs with affinity OFF — purely distance + score.
         $batch1 = array_filter($stopsData, fn($s) => ($s['batch_number'] ?? 1) === 1);
         $batch2 = array_filter($stopsData, fn($s) => ($s['batch_number'] ?? 1) === 2);
 
         $orderedIds = [];
-        foreach ([[$batch1, $driverPos], [$batch2, $driverPos]] as [$batchStops, $startPos]) {
+        foreach ([[$batch1, $driverPos, true], [$batch2, $driverPos, false]] as [$batchStops, $startPos, $withAffinity]) {
             if (empty($batchStops)) continue;
-            $batchOrdered = $this->nnSolver->solve($startPos, $batchStops, $matrix, $indexMap);
+            $batchOrdered = $this->nnSolver->solve($startPos, $batchStops, $matrix, $indexMap, $withAffinity);
             $batchOrdered = $this->twoOpt->improve($batchOrdered, $matrix, $indexMap);
             $orderedIds   = [...$orderedIds, ...$batchOrdered];
         }
