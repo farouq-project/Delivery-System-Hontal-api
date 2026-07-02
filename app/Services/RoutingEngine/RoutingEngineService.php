@@ -321,10 +321,11 @@ class RoutingEngineService
         foreach ($orders as $order) {
             if (isset($indexMap[$order->id])) {
                 $stopsData[$order->id] = [
-                    'lat'         => $order->delivery_latitude,
-                    'lng'         => $order->delivery_longitude,
-                    'total_score' => $scoredOrders[$order->id]['total_score'] ?? 0,
-                    'batch_number'=> $scoredOrders[$order->id]['batch_number'] ?? 1,
+                    'lat'          => $order->delivery_latitude,
+                    'lng'          => $order->delivery_longitude,
+                    'total_score'  => $scoredOrders[$order->id]['total_score'] ?? 0,
+                    'batch_number' => $scoredOrders[$order->id]['batch_number'] ?? 1,
+                    'cluster'      => $order->customer?->cluster ?? null,
                 ];
             }
         }
