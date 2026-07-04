@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
+use App\Models\DeliveryOrder;
 use App\Services\Geocoding\GoogleGeocodingService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -183,7 +185,6 @@ class CustomerController extends Controller
     {
         $merchantId = $request->user()->merchant_id;
 
-        // Find names with more than one record
         $duplicateNames = Customer::where('merchant_id', $merchantId)
             ->select('customer_name')
             ->groupBy('customer_name')
@@ -197,18 +198,56 @@ class CustomerController extends Controller
         $deleted = 0;
 
         foreach ($duplicateNames as $name) {
-            // Keep the record with the most orders (most history), then the oldest id
             $dupes = Customer::where('merchant_id', $merchantId)
                 ->where('customer_name', $name)
-                ->orderByDesc('total_orders')
-                ->orderBy('id')
+                ->orderBy('id')   // ascending → first is oldest
                 ->get();
 
-            $keepId = $dupes->first()->id;
+            // Primary: most orders; ties broken by oldest id
+            $primary = $dupes->sortByDesc('total_orders')->sortBy(fn($c) => $c->id)->first();
+
+            // Oldest record (first created)
+            $oldest  = $dupes->first();
+
+            $duplicateIds = $dupes->pluck('id')->filter(fn($id) => $id !== $primary->id)->values();
+
+            // Reassign all orders from duplicates to primary so total_belanja
+            // and avg_belanja_per_month subqueries include every purchase.
+            DeliveryOrder::whereIn('customer_id', $duplicateIds)
+                ->update(['customer_id' => $primary->id]);
+
+            // Recalculate stored total_orders from actual DB rows
+            $realCount = DeliveryOrder::where('customer_id', $primary->id)->count();
+
+            $update = ['total_orders' => $realCount];
+
+            // Keep oldest lat/lng (and matching address) — only if oldest has coords
+            if ($oldest->id !== $primary->id && $oldest->default_latitude !== null) {
+                $update['default_latitude']  = $oldest->default_latitude;
+                $update['default_longitude'] = $oldest->default_longitude;
+                if ($oldest->default_address) {
+                    $update['default_address'] = $oldest->default_address;
+                }
+            }
+
+            // Keep oldest cluster (any non-null value, including 'no cluster')
+            if ($oldest->id !== $primary->id && $oldest->cluster !== null) {
+                $update['cluster'] = $oldest->cluster;
+            }
+
+            $primary->update($update);
+
+            // Backdate created_at to oldest duplicate so avg_belanja_per_month
+            // denominator spans from when the customer was first seen.
+            if ($oldest->id !== $primary->id) {
+                DB::table('customers')
+                    ->where('id', $primary->id)
+                    ->update(['created_at' => $oldest->created_at]);
+            }
 
             $deleted += Customer::where('merchant_id', $merchantId)
                 ->where('customer_name', $name)
-                ->where('id', '!=', $keepId)
+                ->where('id', '!=', $primary->id)
                 ->delete();
         }
 
