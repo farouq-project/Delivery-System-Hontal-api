@@ -546,6 +546,20 @@ class OrderController extends Controller
 
     private function assignDriver(DeliveryOrder $order, int $driverId, $user): void
     {
+        // If already on a route (e.g. reassigning to a different driver), remove the
+        // existing stop so the old driver's route and klotter stay consistent.
+        $existingStop = RouteStop::where('order_id', $order->id)->first();
+        if ($existingStop) {
+            $route = $existingStop->route;
+            RouteStop::where('route_assignment_id', $existingStop->route_assignment_id)
+                ->where('stop_sequence', '>', $existingStop->stop_sequence)
+                ->decrement('stop_sequence');
+            $existingStop->delete();
+            if ($route) {
+                $route->decrement('total_stops');
+            }
+        }
+
         $fromStatus = $order->status;
         $order->update(['driver_id' => $driverId, 'status' => 'assigned', 'assigned_at' => now()]);
 
