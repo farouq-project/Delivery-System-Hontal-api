@@ -9,6 +9,8 @@ use App\Models\Driver;
 use App\Models\MerchantSetting;
 use App\Models\OrderStatusHistory;
 use App\Models\ProductCatalog;
+use App\Models\Route;
+use App\Models\RouteAssignment;
 use App\Models\RouteStop;
 use App\Services\Geocoding\GoogleGeocodingService;
 use Illuminate\Http\Request;
@@ -564,6 +566,12 @@ class OrderController extends Controller
         $order->update(['driver_id' => $driverId, 'status' => 'assigned', 'assigned_at' => now()]);
 
         try {
+            $this->autoAddRouteStop($order, $driverId, $user);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        try {
             OrderStatusHistory::create([
                 'order_id'        => $order->id,
                 'from_status'     => $fromStatus,
@@ -575,6 +583,42 @@ class OrderController extends Controller
         } catch (\Throwable $e) {
             report($e);
         }
+    }
+
+    private function autoAddRouteStop(DeliveryOrder $order, int $driverId, $user): void
+    {
+        $driver = Driver::find($driverId);
+        if (!$driver) return;
+
+        $routeDate = $order->requested_delivery_date ?? now()->format('Y-m-d');
+
+        $route = Route::firstOrCreate(
+            ['merchant_id' => $driver->merchant_id, 'route_date' => $routeDate],
+            [
+                'ulid'              => Str::ulid(),
+                'status'            => 'draft',
+                'generation_method' => 'manual',
+                'generated_by'      => $user->id,
+                'generated_at'      => now(),
+            ]
+        );
+
+        $assignment = RouteAssignment::firstOrCreate(
+            ['route_id' => $route->id, 'driver_id' => $driverId],
+            ['sequence_number' => $route->assignments()->count() + 1]
+        );
+
+        $nextSeq = (int) RouteStop::where('route_assignment_id', $assignment->id)->max('stop_sequence') + 1;
+
+        RouteStop::create([
+            'route_id'            => $route->id,
+            'route_assignment_id' => $assignment->id,
+            'order_id'            => $order->id,
+            'stop_sequence'       => $nextSeq,
+            'is_manually_placed'  => true,
+        ]);
+
+        $route->increment('total_stops');
     }
 
     private function authorizeMerchant(Request $request, int $merchantId): void
