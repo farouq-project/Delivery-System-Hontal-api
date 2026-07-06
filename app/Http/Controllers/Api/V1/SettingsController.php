@@ -26,7 +26,7 @@ class SettingsController extends Controller
         ]);
 
         $ownerOnlyFields = ['order_edit_pin', 'depot_address', 'depot_latitude', 'depot_longitude', 'hide_driver_logout'];
-        $isOwner = in_array($request->user()->role, ['merchant_owner', 'super_admin', 'developer']);
+        $isOwner = in_array($request->user()->role, ['owner', 'merchant_owner', 'super_admin', 'developer']);
 
         foreach ($ownerOnlyFields as $field) {
             if (isset($data[$field]) && !$isOwner) {
