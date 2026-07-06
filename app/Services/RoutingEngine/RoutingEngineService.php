@@ -347,8 +347,14 @@ class RoutingEngineService
         $orderedIds = [];
         foreach ([[$batch1, $driverPos, true], [$batch2, $driverPos, false]] as [$batchStops, $startPos, $withAffinity]) {
             if (empty($batchStops)) continue;
-            $batchOrdered = $this->nnSolver->solve($startPos, $batchStops, $matrix, $indexMap, $withAffinity);
-            $batchOrdered = $this->twoOpt->improve($batchOrdered, $matrix, $indexMap);
+            if ($withAffinity) {
+                // Batch 1: hard-group by name-prefix / cluster, then NN within each group
+                $batchOrdered = $this->nnSolver->solveGrouped($batchStops, $matrix, $indexMap);
+            } else {
+                // Batch 2: purely distance + score, no grouping
+                $batchOrdered = $this->nnSolver->solve($startPos, $batchStops, $matrix, $indexMap, false);
+                $batchOrdered = $this->twoOpt->improve($batchOrdered, $matrix, $indexMap);
+            }
             $orderedIds   = [...$orderedIds, ...$batchOrdered];
         }
 

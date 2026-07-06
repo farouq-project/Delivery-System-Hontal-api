@@ -64,4 +64,85 @@ class NearestNeighborSolver
 
         return $ordered;
     }
+
+    /**
+     * Hard-group variant: all stops sharing a group_key are visited together
+     * before moving on to the next group. Groups are ordered by their nearest
+     * stop's distance from depot (index 0). Within each group, stops are
+     * sequenced by score-weighted nearest-neighbour. Stops with no group_key
+     * are appended at the end ordered by total_score descending.
+     */
+    public function solveGrouped(array $stops, array $distMatrix, array $indexMap): array
+    {
+        if (empty($stops)) return [];
+
+        $groups    = [];
+        $ungrouped = [];
+        foreach ($stops as $orderId => $stop) {
+            $key = $stop['group_key'] ?? null;
+            if ($key !== null) {
+                $groups[$key][$orderId] = $stop;
+            } else {
+                $ungrouped[$orderId] = $stop;
+            }
+        }
+
+        // Fall back to regular NN when nothing has a group_key
+        if (empty($groups)) {
+            return $this->solve([], $stops, $distMatrix, $indexMap, false);
+        }
+
+        // Order groups: nearest stop in each group to depot (index 0)
+        $groupDist = [];
+        foreach ($groups as $key => $groupStops) {
+            $minDist = PHP_FLOAT_MAX;
+            foreach ($groupStops as $orderId => $stop) {
+                $idx  = $indexMap[$orderId] ?? null;
+                $dist = ($idx !== null) ? ($distMatrix[0][$idx]['distance_m'] ?? PHP_FLOAT_MAX) : PHP_FLOAT_MAX;
+                if ($dist < $minDist) $minDist = $dist;
+            }
+            $groupDist[$key] = $minDist;
+        }
+        asort($groupDist);
+
+        $ordered    = [];
+        $currentIdx = 0;
+
+        foreach (array_keys($groupDist) as $key) {
+            $remaining = $groups[$key];
+
+            while (!empty($remaining)) {
+                $bestId        = null;
+                $bestEffective = PHP_FLOAT_MAX;
+
+                foreach ($remaining as $orderId => $stop) {
+                    $stopIdx = $indexMap[$orderId] ?? null;
+                    if ($stopIdx === null) continue;
+
+                    $raw        = $distMatrix[$currentIdx][$stopIdx]['distance_m'] ?? PHP_INT_MAX;
+                    $scoreBoost = ($stop['total_score'] ?? 0) / 100.0;
+                    $effective  = $raw / (1 + $scoreBoost);
+
+                    if ($effective < $bestEffective) {
+                        $bestEffective = $effective;
+                        $bestId        = $orderId;
+                    }
+                }
+
+                if ($bestId === null) break;
+
+                $ordered[]  = $bestId;
+                $currentIdx = $indexMap[$bestId];
+                unset($remaining[$bestId]);
+            }
+        }
+
+        // Ungrouped stops: append by score descending
+        uasort($ungrouped, fn($a, $b) => ($b['total_score'] ?? 0) <=> ($a['total_score'] ?? 0));
+        foreach (array_keys($ungrouped) as $orderId) {
+            $ordered[] = $orderId;
+        }
+
+        return $ordered;
+    }
 }

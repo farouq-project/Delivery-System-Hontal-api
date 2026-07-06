@@ -34,7 +34,9 @@ class SettingsController extends Controller
             }
         }
 
-        $settings = MerchantSetting::where('merchant_id', $request->user()->merchant_id)->firstOrFail();
+        $settings = MerchantSetting::firstOrCreate(
+            ['merchant_id' => $request->user()->merchant_id]
+        );
         $settings->update($data);
 
         return response()->json(['data' => $settings->fresh()]);
