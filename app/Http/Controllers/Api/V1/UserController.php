@@ -80,11 +80,12 @@ class UserController extends Controller
         $authUser = $request->user();
 
         $data = $request->validate([
-            'name'      => 'sometimes|string|max:255',
-            'email'     => ['sometimes', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
-            'phone'     => 'nullable|string|max:20',
-            'role'      => ['sometimes', Rule::in($this->assignableRoles($authUser))],
-            'is_active' => 'nullable|boolean',
+            'name'       => 'sometimes|string|max:255',
+            'email'      => ['sometimes', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
+            'phone'      => 'nullable|string|max:20',
+            'role'       => ['sometimes', Rule::in($this->assignableRoles($authUser))],
+            'is_active'  => 'nullable|boolean',
+            'can_logout' => 'nullable|boolean',
         ]);
 
         $user->update($data);
@@ -173,14 +174,15 @@ class UserController extends Controller
     private function formatUser(User $user): array
     {
         return [
-            'id'         => $user->id,
-            'ulid'       => $user->ulid,
-            'merchant_id'=> $user->merchant_id,
-            'name'       => $user->name,
-            'email'      => $user->email,
-            'phone'      => $user->phone,
-            'role'       => $user->role,
-            'is_active'  => $user->is_active,
+            'id'          => $user->id,
+            'ulid'        => $user->ulid,
+            'merchant_id' => $user->merchant_id,
+            'name'        => $user->name,
+            'email'       => $user->email,
+            'phone'       => $user->phone,
+            'role'        => $user->role,
+            'is_active'   => $user->is_active,
+            'can_logout'  => $user->can_logout ?? true,
             'last_login_at' => $user->last_login_at,
         ];
     }

@@ -14,7 +14,7 @@ class User extends Authenticatable
 
     protected $fillable = [
         'ulid', 'merchant_id', 'name', 'email', 'phone', 'password',
-        'role', 'avatar_path', 'is_active', 'last_login_at',
+        'role', 'avatar_path', 'is_active', 'can_logout', 'last_login_at',
     ];
 
     protected $hidden = ['password', 'remember_token'];
@@ -25,7 +25,8 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'last_login_at' => 'datetime',
             'password' => 'hashed',
-            'is_active' => 'boolean',
+            'is_active'  => 'boolean',
+            'can_logout' => 'boolean',
         ];
     }
 

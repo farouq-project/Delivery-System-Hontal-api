@@ -93,7 +93,8 @@ class AuthController extends Controller
             'name'     => $user->name,
             'email'    => $user->email,
             'phone'    => $user->phone,
-            'role'     => $user->role,
+            'role'       => $user->role,
+            'can_logout' => $user->can_logout ?? true,
             'merchant' => $user->merchant ? [
                 'id'           => $user->merchant->id,
                 'company_name' => $user->merchant->company_name,
