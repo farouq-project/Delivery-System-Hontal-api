@@ -320,13 +320,8 @@ class RoutingEngineService
         $stopsData = [];
         foreach ($orders as $order) {
             if (isset($indexMap[$order->id])) {
-                // group_key: named cluster (if set) else first 6 chars of customer name.
-                // Used by NearestNeighbor to keep same-area stops together (batch 1 only).
-                $cluster    = $order->customer?->cluster ?? null;
                 $namePrefix = strtolower(trim(substr($order->customer_name ?? '', 0, 6)));
-                $groupKey   = ($cluster && $cluster !== 'no cluster')
-                    ? strtolower($cluster)
-                    : ($namePrefix ?: null);
+                $groupKey   = $namePrefix ?: null;
 
                 $stopsData[$order->id] = [
                     'lat'          => $order->delivery_latitude,
