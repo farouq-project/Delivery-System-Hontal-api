@@ -321,37 +321,20 @@ class RoutingEngineService
         foreach ($orders as $order) {
             if (isset($indexMap[$order->id])) {
                 $namePrefix = strtolower(trim(substr($order->customer_name ?? '', 0, 6)));
-                $groupKey   = $namePrefix ?: null;
 
                 $stopsData[$order->id] = [
-                    'lat'          => $order->delivery_latitude,
-                    'lng'          => $order->delivery_longitude,
-                    'total_score'  => $scoredOrders[$order->id]['total_score'] ?? 0,
-                    'batch_number' => $scoredOrders[$order->id]['batch_number'] ?? 1,
-                    'group_key'    => $groupKey,
+                    'lat'         => $order->delivery_latitude,
+                    'lng'         => $order->delivery_longitude,
+                    'total_score' => $scoredOrders[$order->id]['total_score'] ?? 0,
+                    'group_key'   => $namePrefix ?: null,
                 ];
             }
         }
 
-        // Batch-1 (≤60 min from earliest) runs with group affinity ON — same-area
-        // stops get a 40% effective-distance discount to stay clustered together.
-        // Batch-2 (>60 min) runs with affinity OFF — purely distance + score.
-        $batch1 = array_filter($stopsData, fn($s) => ($s['batch_number'] ?? 1) === 1);
-        $batch2 = array_filter($stopsData, fn($s) => ($s['batch_number'] ?? 1) === 2);
-
-        $orderedIds = [];
-        foreach ([[$batch1, $driverPos, true], [$batch2, $driverPos, false]] as [$batchStops, $startPos, $withAffinity]) {
-            if (empty($batchStops)) continue;
-            if ($withAffinity) {
-                // Batch 1: hard-group by name-prefix / cluster, then NN within each group
-                $batchOrdered = $this->nnSolver->solveGrouped($batchStops, $matrix, $indexMap);
-            } else {
-                // Batch 2: purely distance + score, no grouping
-                $batchOrdered = $this->nnSolver->solve($startPos, $batchStops, $matrix, $indexMap, false);
-                $batchOrdered = $this->twoOpt->improve($batchOrdered, $matrix, $indexMap);
-            }
-            $orderedIds   = [...$orderedIds, ...$batchOrdered];
-        }
+        // Hard-group all stops by the first 6 chars of customer name, then within
+        // each group sequence by score-weighted nearest-neighbour. Groups themselves
+        // are ordered by their nearest stop's distance from the depot.
+        $orderedIds = $this->nnSolver->solveGrouped($stopsData, $matrix, $indexMap);
 
         // Calculate ETAs
         $etaData      = [];
