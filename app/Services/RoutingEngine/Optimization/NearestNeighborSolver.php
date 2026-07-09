@@ -39,8 +39,8 @@ class NearestNeighborSolver
                 $scoreBoost = ($stop['total_score'] ?? 0) / 100.0;
                 $effective  = $raw / (1 + $scoreBoost);
 
-                // Group affinity (batch-1 only): 40% discount for same group_key.
-                // group_key is the named cluster if set, else first 6 chars of name.
+                // Group affinity: 40% discount for same group_key.
+                // group_key is the first 4 chars of customer name.
                 if ($groupAffinity && $currentGroupKey !== null) {
                     $stopGroupKey = $stop['group_key'] ?? null;
                     if ($stopGroupKey !== null && $stopGroupKey === $currentGroupKey) {

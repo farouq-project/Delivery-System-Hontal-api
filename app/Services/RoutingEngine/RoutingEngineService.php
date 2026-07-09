@@ -320,7 +320,7 @@ class RoutingEngineService
         $stopsData = [];
         foreach ($orders as $order) {
             if (isset($indexMap[$order->id])) {
-                $namePrefix = strtolower(trim(substr($order->customer_name ?? '', 0, 6)));
+                $namePrefix = strtolower(trim(substr($order->customer_name ?? '', 0, 4)));
 
                 $stopsData[$order->id] = [
                     'lat'         => $order->delivery_latitude,
