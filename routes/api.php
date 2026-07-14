@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\CustomerDomainController;
+use App\Http\Controllers\Api\V1\FeaturesController;
 use App\Http\Controllers\Api\V1\DriverAppController;
 use App\Http\Controllers\Api\V1\DriverController;
 use App\Http\Controllers\Api\V1\OrderController;
@@ -30,6 +31,9 @@ Route::prefix('v1')->group(function () {
     // kasir and developer are included so they can access operational endpoints.
     // Fine-grained role checks (owner-only actions) are enforced inside each controller.
     Route::middleware(['auth:sanctum', 'role:super_admin,merchant_owner,dispatcher,kasir,developer'])->group(function () {
+
+        // Feature flags for current merchant
+        Route::get('features', [FeaturesController::class, 'index']);
 
         // Geocoding utility
         Route::post('geocode/address', [OrderController::class, 'geocode']);

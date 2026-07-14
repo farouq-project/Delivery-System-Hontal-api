@@ -61,14 +61,39 @@ class CustomerController extends Controller
             )
             ->when($request->search, fn($q, $s) => $q->where(function($q) use ($s) {
                 $q->where('customer_name', 'like', "%{$s}%")
-                  ->orWhere('phone', 'like', "%{$s}%");
+                  ->orWhere('phone', 'like', "%{$s}%")
+                  ->orWhere('default_address', 'like', "%{$s}%")
+                  ->orWhereExists(function($sub) use ($s) {
+                      $sub->from('delivery_orders')
+                          ->whereColumn('customer_id', 'customers.id')
+                          ->where('order_number', 'like', "%{$s}%")
+                          ->whereNull('deleted_at');
+                  })
+                  ->orWhereExists(function($sub) use ($s) {
+                      $sub->from('customer_tag_assignments')
+                          ->join('customer_tags', 'customer_tag_assignments.tag_id', '=', 'customer_tags.id')
+                          ->whereColumn('customer_tag_assignments.customer_id', 'customers.id')
+                          ->where('customer_tags.name', 'like', "%{$s}%");
+                  });
             }))
             ->when($request->vip_level, fn($q, $v) => $q->where('vip_level', $v))
             ->when($request->active !== null, fn($q) => $q->where('is_active', filter_var($request->active, FILTER_VALIDATE_BOOLEAN)))
             ->when($request->has_coords === '1', fn($q) => $q->whereNotNull('default_latitude'))
             ->when($request->has_coords === '0', fn($q) => $q->whereNull('default_latitude'))
             ->when($request->cluster_filter === '1', fn($q) => $q->whereNotNull('cluster')->where('cluster', '!=', 'no cluster'))
-            ->when($request->cluster_filter === '0', fn($q) => $q->where('cluster', 'no cluster'));
+            ->when($request->cluster_filter === '0', fn($q) => $q->where('cluster', 'no cluster'))
+            ->when($request->health_filter, fn($q, $h) => $q->whereExists(function($sub) use ($h) {
+                $sub->from('customer_profiles')
+                    ->whereColumn('customer_id', 'customers.id')
+                    ->where('health_status', $h);
+            }))
+            ->when($request->segment_filter, fn($q, $seg) => $q->whereExists(function($sub) use ($seg) {
+                $sub->from('customer_profiles')
+                    ->whereColumn('customer_id', 'customers.id')
+                    ->where('segment', $seg);
+            }))
+            ->when($request->status_filter === 'active',   fn($q) => $q->where('is_active', true))
+            ->when($request->status_filter === 'inactive', fn($q) => $q->where('is_active', false));
 
         if (in_array($sortBy, ['default_latitude', 'default_longitude'])) {
             $query->orderByRaw("`{$sortBy}` IS NULL ASC")->orderBy($sortBy, $sortDir);
