@@ -390,6 +390,82 @@ class RebuildCustomerDomainTest extends TestCase
         $this->artisan('customers:rebuild')
             ->assertSuccessful()
             ->expectsOutputToContain('Customers Processed')
-            ->expectsOutputToContain('Profiles Rebuilt');
+            ->expectsOutputToContain('Profiles Rebuilt')
+            ->expectsOutputToContain('Timeline Events');
+    }
+
+    /** Timeline backfill creates entries for historical orders without duplicating existing ones */
+    public function test_timeline_backfill_creates_historical_entries(): void
+    {
+        $merchant = $this->createMerchant();
+        $this->enableCustomerDomain($merchant);
+        $customer = $this->createCustomer($merchant);
+
+        // Insert 3 historical orders directly (bypasses observer, so no timeline entries created).
+        // All rows must have identical columns for SQLite bulk insert.
+        $base = [
+            'merchant_id'      => $customer->merchant_id,
+            'customer_id'      => $customer->id,
+            'customer_name'    => $customer->customer_name,
+            'delivery_address' => 'Jl. A No.1',
+            'product_name'     => 'Product',
+            'order_value'      => 100000,
+            'delivered_at'     => null,
+            'failed_at'        => null,
+            'failure_reason'   => null,
+            'created_at'       => now()->toDateTimeString(),
+            'updated_at'       => now()->toDateTimeString(),
+        ];
+        DB::table('delivery_orders')->insert([
+            $base + [
+                'ulid'             => Str::ulid(),
+                'order_number'     => 'ORD-HIST-001',
+                'status'           => 'delivered',
+                'order_value'      => 100000,
+                'order_created_at' => now()->subDays(30)->toDateTimeString(),
+                'delivered_at'     => now()->subDays(30)->addHours(2)->toDateTimeString(),
+            ],
+            $base + [
+                'ulid'             => Str::ulid(),
+                'order_number'     => 'ORD-HIST-002',
+                'status'           => 'failed',
+                'order_value'      => 50000,
+                'order_created_at' => now()->subDays(20)->toDateTimeString(),
+                'failed_at'        => now()->subDays(20)->addHours(3)->toDateTimeString(),
+                'failure_reason'   => 'Customer not home',
+            ],
+            $base + [
+                'ulid'             => Str::ulid(),
+                'order_number'     => 'ORD-HIST-003',
+                'status'           => 'delivered',
+                'order_value'      => 200000,
+                'order_created_at' => now()->subDays(10)->toDateTimeString(),
+                'delivered_at'     => now()->subDays(10)->addHours(1)->toDateTimeString(),
+            ],
+        ]);
+
+        // Confirm no timeline entries exist before rebuild
+        $this->assertEquals(0, \App\Models\CustomerTimeline::withoutGlobalScope(\App\Models\Scopes\MerchantScope::class)
+            ->where('customer_id', $customer->id)
+            ->whereIn('event_type', ['order_created', 'order_delivered', 'order_failed'])
+            ->count());
+
+        $this->artisan('customers:rebuild')->assertSuccessful();
+
+        $entries = \App\Models\CustomerTimeline::withoutGlobalScope(\App\Models\Scopes\MerchantScope::class)
+            ->where('customer_id', $customer->id)
+            ->get(['event_type', 'event_data']);
+
+        // 3 orders × order_created + 2 delivered × order_delivered + 1 failed × order_failed = 6 entries
+        $this->assertEquals(3, $entries->where('event_type', 'order_created')->count());
+        $this->assertEquals(2, $entries->where('event_type', 'order_delivered')->count());
+        $this->assertEquals(1, $entries->where('event_type', 'order_failed')->count());
+
+        // Running again must not duplicate anything
+        $this->artisan('customers:rebuild')->assertSuccessful();
+        $this->assertEquals(6, \App\Models\CustomerTimeline::withoutGlobalScope(\App\Models\Scopes\MerchantScope::class)
+            ->where('customer_id', $customer->id)
+            ->whereIn('event_type', ['order_created', 'order_delivered', 'order_failed'])
+            ->count());
     }
 }

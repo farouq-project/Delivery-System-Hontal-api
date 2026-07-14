@@ -42,6 +42,7 @@ class RebuildCustomerDomain extends Command
             'profiles_rebuilt'=> 0,
             'health_updated'  => 0,
             'segments_updated'=> 0,
+            'timeline_added'  => 0,
             'errors'          => 0,
             'skipped'         => 0,
         ];
@@ -106,6 +107,7 @@ class RebuildCustomerDomain extends Command
         }
 
         $counters['profiles_rebuilt']++;
+        $counters['timeline_added'] += $result['timeline_added'] ?? 0;
 
         if ($result['updated'])         $counters['updated']++;
         if ($result['health_updated'])  $counters['health_updated']++;
@@ -150,6 +152,7 @@ class RebuildCustomerDomain extends Command
         $this->line("  Records Updated     : {$counters['updated']}");
         $this->line("  Health Updated      : {$counters['health_updated']}");
         $this->line("  Segments Updated    : {$counters['segments_updated']}");
+        $this->line("  Timeline Events     : {$counters['timeline_added']}");
         $this->line("  Errors              : {$counters['errors']}");
         $this->line("  Execution Time      : {$elapsed}s");
         $this->line('═══════════════════════════════════════════');
