@@ -7,11 +7,14 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // Backfill legacy enum values to new names before altering the column
-        DB::statement("UPDATE merchant_settings SET routing_algorithm = 'balanced'  WHERE routing_algorithm IN ('scored', 'hybrid')");
-        DB::statement("UPDATE merchant_settings SET routing_algorithm = 'distance'  WHERE routing_algorithm = 'nearest_neighbor'");
+        // Step 1: expand the ENUM to include both old and new values so the backfill UPDATEs are valid
+        DB::statement("ALTER TABLE merchant_settings MODIFY routing_algorithm ENUM('nearest_neighbor','scored','hybrid','balanced','distance','vip') NOT NULL DEFAULT 'balanced'");
 
-        // Replace the enum constraint with the values the application actually uses
+        // Step 2: backfill legacy values to new names
+        DB::statement("UPDATE merchant_settings SET routing_algorithm = 'balanced' WHERE routing_algorithm IN ('scored', 'hybrid')");
+        DB::statement("UPDATE merchant_settings SET routing_algorithm = 'distance' WHERE routing_algorithm = 'nearest_neighbor'");
+
+        // Step 3: narrow the ENUM to only the values the application uses
         DB::statement("ALTER TABLE merchant_settings MODIFY routing_algorithm ENUM('balanced','distance','vip') NOT NULL DEFAULT 'balanced'");
     }
 
