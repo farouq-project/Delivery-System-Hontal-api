@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\CustomerDomainController;
+use App\Http\Controllers\Api\V1\ExecutiveDashboardController;
 use App\Http\Controllers\Api\V1\FeaturesController;
 use App\Http\Controllers\Api\V1\DriverAppController;
 use App\Http\Controllers\Api\V1\DriverController;
@@ -34,6 +35,9 @@ Route::prefix('v1')->group(function () {
 
         // Feature flags for current merchant
         Route::get('features', [FeaturesController::class, 'index']);
+
+        // Executive Dashboard (Phase 2B — role-gated inside controller)
+        Route::get('dashboard/executive', [ExecutiveDashboardController::class, 'index']);
 
         // Geocoding utility
         Route::post('geocode/address', [OrderController::class, 'geocode']);

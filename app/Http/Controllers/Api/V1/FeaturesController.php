@@ -15,17 +15,24 @@ class FeaturesController extends Controller
         $user = $request->user();
 
         if (in_array($user->role, ['super_admin', 'developer'])) {
-            return response()->json(['data' => ['customer_domain' => true]]);
+            return response()->json(['data' => [
+                'customer_domain'     => true,
+                'executive_dashboard' => true,
+            ]]);
         }
 
         $merchantId = $user->merchant_id;
 
         if (!$merchantId) {
-            return response()->json(['data' => ['customer_domain' => false]]);
+            return response()->json(['data' => [
+                'customer_domain'     => false,
+                'executive_dashboard' => false,
+            ]]);
         }
 
         return response()->json(['data' => [
-            'customer_domain' => $this->features->isEnabled($merchantId, 'customer_domain'),
+            'customer_domain'     => $this->features->isEnabled($merchantId, 'customer_domain'),
+            'executive_dashboard' => $this->features->isEnabled($merchantId, 'executive_dashboard'),
         ]]);
     }
 }
