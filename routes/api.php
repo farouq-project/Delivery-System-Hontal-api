@@ -26,7 +26,9 @@ Route::prefix('v1')->group(function () {
     });
 
     // ─── DISPATCHER / OWNER ROUTES ────────────────────────────────────
-    Route::middleware(['auth:sanctum', 'role:super_admin,merchant_owner,dispatcher'])->group(function () {
+    // kasir and developer are included so they can access operational endpoints.
+    // Fine-grained role checks (owner-only actions) are enforced inside each controller.
+    Route::middleware(['auth:sanctum', 'role:super_admin,merchant_owner,dispatcher,kasir,developer'])->group(function () {
 
         // Geocoding utility
         Route::post('geocode/address', [OrderController::class, 'geocode']);
@@ -78,6 +80,16 @@ Route::prefix('v1')->group(function () {
         // Settings
         Route::get('settings',   [SettingsController::class, 'show']);
         Route::patch('settings', [SettingsController::class, 'update']);
+
+        // Cashier names (per-merchant, owner-only write)
+        Route::get('settings/cashiers',         [SettingsController::class, 'indexCashiers']);
+        Route::post('settings/cashiers',        [SettingsController::class, 'storeCashier']);
+        Route::delete('settings/cashiers/{id}', [SettingsController::class, 'destroyCashier']);
+
+        // Cluster names (per-merchant, owner-only write)
+        Route::get('settings/clusters',         [SettingsController::class, 'indexClusters']);
+        Route::post('settings/clusters',        [SettingsController::class, 'storeCluster']);
+        Route::delete('settings/clusters/{id}', [SettingsController::class, 'destroyCluster']);
     });
 
     // ─── USER MANAGEMENT (developer / super_admin / merchant_owner) ───

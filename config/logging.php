@@ -123,6 +123,14 @@ return [
             'handler' => NullHandler::class,
         ],
 
+        'business' => [
+            'driver' => 'daily',
+            'path'   => storage_path('logs/business.log'),
+            'level'  => 'info',
+            'days'   => env('LOG_BUSINESS_DAYS', 30),
+            'replace_placeholders' => true,
+        ],
+
         'emergency' => [
             'path' => storage_path('logs/laravel.log'),
         ],

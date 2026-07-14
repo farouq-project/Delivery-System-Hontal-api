@@ -2,10 +2,16 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\MerchantScope;
 use Illuminate\Database\Eloquent\Model;
 
 class ProductCatalog extends Model
 {
+    protected static function booted(): void
+    {
+        static::addGlobalScope(new MerchantScope());
+    }
+
     protected $table = 'product_catalog';
 
     protected $fillable = [

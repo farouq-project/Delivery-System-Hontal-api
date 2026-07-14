@@ -44,6 +44,21 @@ class Merchant extends Model
         return $this->hasOne(MerchantSetting::class);
     }
 
+    public function cashiers()
+    {
+        return $this->hasMany(MerchantCashier::class);
+    }
+
+    public function clusters()
+    {
+        return $this->hasMany(MerchantCluster::class);
+    }
+
+    public function features()
+    {
+        return $this->hasMany(MerchantFeature::class);
+    }
+
     public function vipConfigs()
     {
         return $this->hasMany(VipConfig::class);

@@ -2,20 +2,27 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Events\RouteGenerated;
 use App\Http\Controllers\Controller;
+use App\Http\Traits\ResolvesCurrentMerchant;
 use App\Models\DeliveryOrder;
 use App\Models\Driver;
-use App\Models\OrderStatusHistory;
 use App\Models\Route;
 use App\Models\RouteAssignment;
 use App\Models\RouteStop;
+use App\Services\OrderService;
 use App\Services\RoutingEngine\RoutingEngineService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 class RouteController extends Controller
 {
-    public function __construct(private RoutingEngineService $engine) {}
+    use ResolvesCurrentMerchant;
+
+    public function __construct(
+        private readonly RoutingEngineService $engine,
+        private readonly OrderService         $orderService,
+    ) {}
 
     public function index(Request $request)
     {
@@ -43,6 +50,9 @@ class RouteController extends Controller
         try {
             $route = $this->engine->generate($merchant, $request->route_date);
 
+            $orderCount = RouteStop::where('route_id', $route->id)->count();
+            event(new RouteGenerated($route, $merchant, $request->user(), $orderCount));
+
             return response()->json(['data' => $this->loadFullRoute($route)], 201);
         } catch (\RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -54,7 +64,6 @@ class RouteController extends Controller
     public function show(Request $request, Route $route)
     {
         $this->authorizeMerchant($request, $route->merchant_id);
-
         return response()->json(['data' => $this->loadFullRoute($route)]);
     }
 
@@ -101,7 +110,6 @@ class RouteController extends Controller
     {
         $this->authorizeMerchant($request, $route->merchant_id);
 
-        // Only clear the null-driver (unassigned) assignment — leaves driver-assigned stops intact
         $nullAssignment = RouteAssignment::where('route_id', $route->id)
             ->whereNull('driver_id')
             ->first();
@@ -109,7 +117,6 @@ class RouteController extends Controller
         if ($nullAssignment) {
             $orderIds = RouteStop::where('route_assignment_id', $nullAssignment->id)->pluck('order_id');
 
-            // Clear routing data so orders appear unsequenced (eligible for re-routing)
             DeliveryOrder::whereIn('id', $orderIds)
                 ->update(['route_sequence' => null]);
 
@@ -118,7 +125,6 @@ class RouteController extends Controller
             $nullAssignment->delete();
         }
 
-        // Delete the route record if no assignments remain
         if ($route->assignments()->count() === 0) {
             $route->delete();
         }
@@ -134,10 +140,7 @@ class RouteController extends Controller
             return response()->json(['message' => 'Only the merchant owner can delete a dispatch.'], 403);
         }
 
-        // Delete without touching order statuses — orders keep their current state.
-        // Use Reset Dispatch to also return orders to pending.
         $route->delete();
-
         return response()->json(null, 204);
     }
 
@@ -153,9 +156,7 @@ class RouteController extends Controller
         $merchant = $request->user()->merchant;
         $merchant->load('vipConfigs');
 
-        $newOrderIds = $request->new_order_ids ?? [];
-
-        // Also pick up any pending orders not yet in route
+        $newOrderIds      = $request->new_order_ids ?? [];
         $existingOrderIds = RouteStop::where('route_id', $route->id)->pluck('order_id')->toArray();
         $autoNewOrders    = DeliveryOrder::where('merchant_id', $merchant->id)
             ->where('status', 'pending')
@@ -193,7 +194,6 @@ class RouteController extends Controller
             $oldSeq  = $stop->stop_sequence;
             $asgmtId = $request->route_assignment_id ?? $stop->route_assignment_id;
 
-            // Shift other stops
             if ($newSeq < $oldSeq) {
                 RouteStop::where('route_assignment_id', $asgmtId)
                     ->whereBetween('stop_sequence', [$newSeq, $oldSeq - 1])
@@ -248,8 +248,6 @@ class RouteController extends Controller
         $driver = Driver::where('merchant_id', $merchantId)->findOrFail($request->driver_id);
         $orders = DeliveryOrder::where('merchant_id', $merchantId)->whereIn('id', $request->order_ids)->get();
 
-        // Sort by route_sequence (routing priority) so stop_sequence is assigned in score order.
-        // Orders without a route_sequence (unrouted) go last.
         $orders = $orders->sortBy(fn($o) => $o->route_sequence ?? PHP_INT_MAX)->values();
 
         $route = null;
@@ -280,8 +278,7 @@ class RouteController extends Controller
             ['sequence_number' => $route->assignments()->count() + 1]
         );
 
-        // If the order already has a stop on this route (e.g. in the unassigned group), move it and
-        // carry over scores so the driver's stop retains its routing priority.
+        // Carry over scores when moving an order from the unassigned group
         $existingStop = RouteStop::where('route_id', $route->id)->where('order_id', $order->id)->first();
         $scores = [];
         if ($existingStop) {
@@ -314,21 +311,10 @@ class RouteController extends Controller
             $route->increment('total_stops');
         }
 
-        $fromStatus = $order->status;
-        $order->update(['driver_id' => $driver->id, 'status' => 'assigned', 'assigned_at' => now()]);
-
-        try {
-            OrderStatusHistory::create([
-                'order_id'        => $order->id,
-                'from_status'     => $fromStatus,
-                'to_status'       => 'assigned',
-                'changed_by'      => $request->user()->id,
-                'changed_by_role' => $request->user()->role,
-                'notes'           => "Assigned to driver #{$driver->id} via dispatch board",
-            ]);
-        } catch (\Throwable $e) {
-            report($e);
-        }
+        $this->orderService->transition($order, 'assigned', $request->user(), [
+            'driver_id' => $driver->id,
+            'notes'     => "Assigned to driver #{$driver->id} via dispatch board",
+        ]);
 
         return $route;
     }
@@ -340,13 +326,11 @@ class RouteController extends Controller
         $asgmtId = $stop->route_assignment_id;
         $seq     = $stop->stop_sequence;
 
-        // Move order back to pending
         DeliveryOrder::where('id', $stop->order_id)
             ->update(['status' => 'pending', 'driver_id' => null, 'route_sequence' => null]);
 
         $stop->delete();
 
-        // Resequence remaining
         RouteStop::where('route_assignment_id', $asgmtId)
             ->where('stop_sequence', '>', $seq)
             ->decrement('stop_sequence');
@@ -354,12 +338,5 @@ class RouteController extends Controller
         $route->decrement('total_stops');
 
         return response()->json(null, 204);
-    }
-
-    private function authorizeMerchant(Request $request, int $merchantId): void
-    {
-        if ($request->user()->merchant_id !== $merchantId && !$request->user()->isSuperAdmin()) {
-            abort(403, 'Access denied.');
-        }
     }
 }

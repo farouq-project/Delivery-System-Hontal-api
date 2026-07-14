@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\MerchantScope;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -9,6 +10,11 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Customer extends Model
 {
     use HasFactory, SoftDeletes;
+
+    protected static function booted(): void
+    {
+        static::addGlobalScope(new MerchantScope());
+    }
 
     protected $fillable = [
         'ulid', 'merchant_id', 'customer_name', 'phone', 'email',

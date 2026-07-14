@@ -2,12 +2,18 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\MerchantScope;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Route extends Model
 {
     use HasFactory;
+
+    protected static function booted(): void
+    {
+        static::addGlobalScope(new MerchantScope());
+    }
 
     protected $fillable = [
         'ulid', 'merchant_id', 'route_date', 'label', 'status',

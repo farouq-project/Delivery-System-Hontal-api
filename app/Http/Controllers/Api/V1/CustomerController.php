@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Traits\ResolvesCurrentMerchant;
 use App\Models\Customer;
 use App\Models\DeliveryOrder;
+use App\Models\MerchantCluster;
 use App\Services\Geocoding\GoogleGeocodingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -13,25 +15,23 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
-use PhpOffice\PhpSpreadsheet\Style\Font;
 
 class CustomerController extends Controller
 {
+    use ResolvesCurrentMerchant;
+
     public function __construct(private GoogleGeocodingService $geocoder) {}
 
-    private const CLUSTERS = [
-        'Banyak','Candra','Guru','Jingga','Kama','Kidang','Kumala','Larang',
-        'Loka','Mayang','Naga','Naya','Pita','Purba','Rambut','Ratna',
-        'Sima','Subang','Taru','Teja','Titis','Wangsa',
-    ];
-
-    private function detectCluster(string $name): string
+    private function detectCluster(int $merchantId, string $name): string
     {
-        foreach (self::CLUSTERS as $cluster) {
+        $clusters = MerchantCluster::namesForMerchant($merchantId);
+
+        foreach ($clusters as $cluster) {
             if (stripos($name, $cluster) !== false) {
                 return $cluster;
             }
         }
+
         return 'no cluster';
     }
 
@@ -45,14 +45,12 @@ class CustomerController extends Controller
 
         $query = Customer::where('merchant_id', $merchantId)
             ->select('customers.*')
-            // Total of all non-cancelled/failed orders
             ->selectRaw(
                 "(SELECT COALESCE(SUM(order_value),0) FROM delivery_orders
                   WHERE customer_id=customers.id
                   AND status NOT IN ('cancelled','failed')
                   AND deleted_at IS NULL) AS total_belanja"
             )
-            // Average per calendar month since the customer record was created
             ->selectRaw(
                 "(SELECT COALESCE(SUM(order_value),0) FROM delivery_orders
                   WHERE customer_id=customers.id
@@ -69,12 +67,9 @@ class CustomerController extends Controller
             ->when($request->active !== null, fn($q) => $q->where('is_active', filter_var($request->active, FILTER_VALIDATE_BOOLEAN)))
             ->when($request->has_coords === '1', fn($q) => $q->whereNotNull('default_latitude'))
             ->when($request->has_coords === '0', fn($q) => $q->whereNull('default_latitude'))
-            // cluster_filter=1 → named cluster (not null, not 'no cluster')
-            // cluster_filter=0 → explicitly 'no cluster'
             ->when($request->cluster_filter === '1', fn($q) => $q->whereNotNull('cluster')->where('cluster', '!=', 'no cluster'))
             ->when($request->cluster_filter === '0', fn($q) => $q->where('cluster', 'no cluster'));
 
-        // Coordinates need NULL-last handling; belanja columns always have a value (0 via COALESCE)
         if (in_array($sortBy, ['default_latitude', 'default_longitude'])) {
             $query->orderByRaw("`{$sortBy}` IS NULL ASC")->orderBy($sortBy, $sortDir);
         } else {
@@ -98,12 +93,12 @@ class CustomerController extends Controller
             'notes'              => 'nullable|string',
         ]);
 
-        // Always auto-detect cluster from name (returns named cluster or 'no cluster')
+        $merchantId = $request->user()->merchant_id;
+
         if (empty($data['cluster'])) {
-            $data['cluster'] = $this->detectCluster($data['customer_name']);
+            $data['cluster'] = $this->detectCluster($merchantId, $data['customer_name']);
         }
 
-        // Auto-geocode if no coordinates provided
         if (empty($data['default_latitude']) && !empty($data['default_address'])) {
             $geo = $this->geocoder->geocode($data['default_address']);
             if ($geo) {
@@ -115,7 +110,7 @@ class CustomerController extends Controller
         $customer = Customer::create([
             ...$data,
             'ulid'        => Str::ulid(),
-            'merchant_id' => $request->user()->merchant_id,
+            'merchant_id' => $merchantId,
             'vip_level'   => $data['vip_level'] ?? 'standard',
         ]);
 
@@ -145,13 +140,11 @@ class CustomerController extends Controller
             'is_active'         => 'nullable|boolean',
         ]);
 
-        // Auto-detect cluster from name when cluster is explicitly sent as empty/null
         if (array_key_exists('cluster', $data) && empty($data['cluster'])) {
             $name = $data['customer_name'] ?? $customer->customer_name;
-            $data['cluster'] = $this->detectCluster($name);
+            $data['cluster'] = $this->detectCluster($customer->merchant_id, $name);
         }
 
-        // Re-geocode if address changed and no new coords provided
         if (isset($data['default_address']) && empty($data['default_latitude'])) {
             $geo = $this->geocoder->geocode($data['default_address']);
             if ($geo) {
@@ -200,28 +193,21 @@ class CustomerController extends Controller
         foreach ($duplicateNames as $name) {
             $dupes = Customer::where('merchant_id', $merchantId)
                 ->where('customer_name', $name)
-                ->orderBy('id')   // ascending → first is oldest
+                ->orderBy('id')
                 ->get();
 
-            // Primary: most orders; ties broken by oldest id
             $primary = $dupes->sortByDesc('total_orders')->sortBy(fn($c) => $c->id)->first();
-
-            // Oldest record (first created)
             $oldest  = $dupes->first();
 
             $duplicateIds = $dupes->pluck('id')->filter(fn($id) => $id !== $primary->id)->values();
 
-            // Reassign all orders from duplicates to primary so total_belanja
-            // and avg_belanja_per_month subqueries include every purchase.
             DeliveryOrder::whereIn('customer_id', $duplicateIds)
                 ->update(['customer_id' => $primary->id]);
 
-            // Recalculate stored total_orders from actual DB rows
             $realCount = DeliveryOrder::where('customer_id', $primary->id)->count();
 
             $update = ['total_orders' => $realCount];
 
-            // Keep oldest lat/lng (and matching address) — only if oldest has coords
             if ($oldest->id !== $primary->id && $oldest->default_latitude !== null) {
                 $update['default_latitude']  = $oldest->default_latitude;
                 $update['default_longitude'] = $oldest->default_longitude;
@@ -230,15 +216,12 @@ class CustomerController extends Controller
                 }
             }
 
-            // Keep oldest cluster (any non-null value, including 'no cluster')
             if ($oldest->id !== $primary->id && $oldest->cluster !== null) {
                 $update['cluster'] = $oldest->cluster;
             }
 
             $primary->update($update);
 
-            // Backdate created_at to oldest duplicate so avg_belanja_per_month
-            // denominator spans from when the customer was first seen.
             if ($oldest->id !== $primary->id) {
                 DB::table('customers')
                     ->where('id', $primary->id)
@@ -292,7 +275,6 @@ class CustomerController extends Controller
             return response()->json(['message' => 'The file is empty.'], 422);
         }
 
-        // First row = header. Map known column names (case-insensitive) to indexes.
         $header = array_map(fn($h) => strtolower(trim((string) $h)), $rows[0]);
         $columnMap = [
             'customer_name'   => ['customer_name', 'name', 'nama', 'nama pelanggan'],
@@ -324,7 +306,6 @@ class CustomerController extends Controller
 
         for ($i = 1; $i < count($rows); $i++) {
             $row = $rows[$i];
-
             $get = fn($field) => isset($columnIndex[$field]) ? trim((string) ($row[$columnIndex[$field]] ?? '')) : '';
 
             $customerName = $get('customer_name');
@@ -338,8 +319,8 @@ class CustomerController extends Controller
                 $vipLevel = 'standard';
             }
 
-            $address = $get('default_address');
-            $latitude = null;
+            $address   = $get('default_address');
+            $latitude  = null;
             $longitude = null;
 
             if ($address !== '') {
@@ -361,7 +342,7 @@ class CustomerController extends Controller
                     'default_latitude'  => $latitude,
                     'default_longitude' => $longitude,
                     'vip_level'         => $vipLevel,
-                    'cluster'           => $get('cluster') ?: $this->detectCluster($customerName),
+                    'cluster'           => $get('cluster') ?: $this->detectCluster($merchantId, $customerName),
                     'notes'             => $get('notes') ?: null,
                 ]);
                 $imported++;
@@ -403,7 +384,6 @@ class CustomerController extends Controller
         }
 
         $sheet->setTitle('Customers');
-
         $writer = new Xlsx($spreadsheet);
 
         return response()->streamDownload(function () use ($writer) {
@@ -429,12 +409,5 @@ class CustomerController extends Controller
             ->get();
 
         return response()->json(['data' => $results]);
-    }
-
-    private function authorizeMerchant(Request $request, int $merchantId): void
-    {
-        if ($request->user()->merchant_id !== $merchantId && !$request->user()->isSuperAdmin()) {
-            abort(403, 'Access denied.');
-        }
     }
 }

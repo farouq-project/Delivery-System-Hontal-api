@@ -2,19 +2,22 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Events\StopCompleted;
 use App\Http\Controllers\Controller;
 use App\Models\DeliveryOrder;
 use App\Models\Driver;
 use App\Models\MerchantSetting;
 use App\Models\DriverLocation;
-use App\Models\OrderStatusHistory;
 use App\Models\ProofOfDelivery;
 use App\Models\RouteStop;
+use App\Services\OrderService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
 class DriverAppController extends Controller
 {
+    public function __construct(private readonly OrderService $orderService) {}
+
     public function me(Request $request)
     {
         $user   = $request->user();
@@ -67,12 +70,12 @@ class DriverAppController extends Controller
                 'failed_stops'        => $assignment->failed_stops,
                 'remaining_stops'     => $assignment->total_stops - $assignment->completed_stops - $assignment->failed_stops,
                 'stops'               => $assignment->stops->map(fn($s) => [
-                    'stop_id'       => $s->id,
-                    'stop_sequence' => $s->stop_sequence,
-                    'order_id'      => $s->order_id,
-                    'is_locked'     => $s->is_locked,
+                    'stop_id'           => $s->id,
+                    'stop_sequence'     => $s->stop_sequence,
+                    'order_id'          => $s->order_id,
+                    'is_locked'         => $s->is_locked,
                     'estimated_arrival' => $s->estimated_arrival?->toISOString(),
-                    'order'         => $s->order,
+                    'order'             => $s->order,
                 ]),
             ],
         ]);
@@ -91,14 +94,12 @@ class DriverAppController extends Controller
 
         $driver = $this->getDriver($request);
 
-        // Update driver's live position
         $driver->update([
             'current_lat' => $request->latitude,
             'current_lng' => $request->longitude,
             'last_seen'   => now(),
         ]);
 
-        // Store location history
         DriverLocation::create([
             'driver_id'   => $driver->id,
             'merchant_id' => $driver->merchant_id,
@@ -125,9 +126,7 @@ class DriverAppController extends Controller
     public function deliver(Request $request, int $stopId)
     {
         $driver = $this->getDriver($request);
-        $stop   = RouteStop::with('order')
-            ->findOrFail($stopId);
-
+        $stop   = RouteStop::with('order')->findOrFail($stopId);
         $this->authorizeStop($stop, $driver);
 
         $request->validate([
@@ -140,7 +139,6 @@ class DriverAppController extends Controller
 
         $order = $stop->order;
 
-        // Handle photo upload — continue without photo if storage fails
         $photoPath = null;
         if ($request->hasFile('photo')) {
             try {
@@ -163,22 +161,13 @@ class DriverAppController extends Controller
             ]
         );
 
-        $fromStatus = $order->status;
-        $order->update(['status' => 'delivered', 'delivered_at' => now()]);
+        $this->orderService->transition($order, 'delivered', $request->user(), [
+            'latitude'  => $request->latitude,
+            'longitude' => $request->longitude,
+        ]);
 
-        // Post-save operations wrapped in try-catch: if any of these fail the
-        // delivery is already persisted, so we still return 200 to the driver.
+        // Post-delivery ops: if any fail, delivery is already persisted — return 200
         try {
-            OrderStatusHistory::create([
-                'order_id'        => $order->id,
-                'from_status'     => $fromStatus,
-                'to_status'       => 'delivered',
-                'changed_by'      => $request->user()->id,
-                'changed_by_role' => 'driver',
-                'latitude'        => $request->latitude,
-                'longitude'       => $request->longitude,
-            ]);
-
             $stop->update(['actual_arrival' => now()]);
 
             $assignment = $stop->assignment;
@@ -192,6 +181,8 @@ class DriverAppController extends Controller
                 $assignment->update(['status' => 'completed', 'actual_end_at' => now()]);
                 $driver->update(['status' => 'available']);
             }
+
+            event(new StopCompleted($stop, $order->fresh(), $driver, $request->user(), 'delivered'));
         } catch (\Throwable $e) {
             report($e);
         }
@@ -212,27 +203,21 @@ class DriverAppController extends Controller
         ]);
 
         $order = $stop->order;
-        $fromStatus = $order->status;
 
-        $order->update([
-            'status'         => 'failed',
-            'failure_reason' => $request->reason,
-            'failed_at'      => now(),
+        $this->orderService->transition($order, 'failed', $request->user(), [
+            'reason'    => $request->reason,
+            'latitude'  => $request->latitude,
+            'longitude' => $request->longitude,
         ]);
 
-        OrderStatusHistory::create([
-            'order_id'        => $order->id,
-            'from_status'     => $fromStatus,
-            'to_status'       => 'failed',
-            'changed_by'      => $request->user()->id,
-            'changed_by_role' => 'driver',
-            'notes'           => $request->reason,
-            'latitude'        => $request->latitude,
-            'longitude'       => $request->longitude,
-        ]);
+        try {
+            $assignment = $stop->assignment;
+            $assignment->increment('failed_stops');
 
-        $assignment = $stop->assignment;
-        $assignment->increment('failed_stops');
+            event(new StopCompleted($stop, $order->fresh(), $driver, $request->user(), 'failed'));
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         return response()->json(['message' => 'Failure reported.']);
     }

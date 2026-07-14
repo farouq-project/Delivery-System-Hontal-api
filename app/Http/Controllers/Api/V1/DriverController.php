@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Traits\ResolvesCurrentMerchant;
 use App\Models\Driver;
 use App\Models\DriverLocation;
 use App\Models\User;
@@ -12,6 +13,8 @@ use Illuminate\Support\Str;
 
 class DriverController extends Controller
 {
+    use ResolvesCurrentMerchant;
+
     public function index(Request $request)
     {
         $merchantId = $request->user()->merchant_id;
@@ -57,16 +60,16 @@ class DriverController extends Controller
         }
 
         $driver = Driver::create([
-            'ulid'               => Str::ulid(),
-            'merchant_id'        => $request->user()->merchant_id,
-            'user_id'            => $userId,
-            'driver_name'        => $data['driver_name'],
-            'phone'              => $data['phone'],
-            'vehicle_type'       => $data['vehicle_type'],
-            'vehicle_plate'      => $data['vehicle_plate'],
+            'ulid'                => Str::ulid(),
+            'merchant_id'         => $request->user()->merchant_id,
+            'user_id'             => $userId,
+            'driver_name'         => $data['driver_name'],
+            'phone'               => $data['phone'],
+            'vehicle_type'        => $data['vehicle_type'],
+            'vehicle_plate'       => $data['vehicle_plate'],
             'vehicle_capacity_kg' => $data['vehicle_capacity_kg'] ?? null,
-            'notes'              => $data['notes'] ?? null,
-            'status'             => 'offline',
+            'notes'               => $data['notes'] ?? null,
+            'status'              => 'offline',
         ]);
 
         return response()->json(['data' => $driver], 201);
@@ -74,14 +77,14 @@ class DriverController extends Controller
 
     public function show(Request $request, Driver $driver)
     {
-        $this->authorize($request, $driver);
+        $this->authorizeMerchant($request, $driver->merchant_id);
         $driver->load(['todayAssignment', 'latestLocation']);
         return response()->json(['data' => $driver]);
     }
 
     public function update(Request $request, Driver $driver)
     {
-        $this->authorize($request, $driver);
+        $this->authorizeMerchant($request, $driver->merchant_id);
 
         $data = $request->validate([
             'driver_name'         => 'sometimes|string|max:255',
@@ -99,14 +102,14 @@ class DriverController extends Controller
 
     public function destroy(Request $request, Driver $driver)
     {
-        $this->authorize($request, $driver);
+        $this->authorizeMerchant($request, $driver->merchant_id);
         $driver->delete();
         return response()->json(null, 204);
     }
 
     public function updateStatus(Request $request, Driver $driver)
     {
-        $this->authorize($request, $driver);
+        $this->authorizeMerchant($request, $driver->merchant_id);
         $request->validate(['status' => 'required|in:available,delivering,offline']);
         $driver->update(['status' => $request->status]);
         return response()->json(['data' => $driver->fresh()]);
@@ -123,12 +126,12 @@ class DriverController extends Controller
             ->get()
             ->map(function ($d) {
                 return [
-                    'driver_id'   => $d->id,
-                    'driver_name' => $d->driver_name,
-                    'status'      => $d->status,
-                    'lat'         => $d->current_lat,
-                    'lng'         => $d->current_lng,
-                    'last_seen'   => $d->last_seen?->toISOString(),
+                    'driver_id'    => $d->id,
+                    'driver_name'  => $d->driver_name,
+                    'status'       => $d->status,
+                    'lat'          => $d->current_lat,
+                    'lng'          => $d->current_lng,
+                    'last_seen'    => $d->last_seen?->toISOString(),
                     'vehicle_type' => $d->vehicle_type,
                 ];
             });
@@ -138,7 +141,7 @@ class DriverController extends Controller
 
     public function locationHistory(Request $request, Driver $driver)
     {
-        $this->authorize($request, $driver);
+        $this->authorizeMerchant($request, $driver->merchant_id);
 
         $from = $request->from ?? now()->subHours(8)->toISOString();
         $to   = $request->to   ?? now()->toISOString();
@@ -150,12 +153,5 @@ class DriverController extends Controller
             ->get();
 
         return response()->json(['data' => $locations]);
-    }
-
-    private function authorize(Request $request, Driver $driver): void
-    {
-        if ($request->user()->merchant_id !== $driver->merchant_id && !$request->user()->isSuperAdmin()) {
-            abort(403, 'Access denied.');
-        }
     }
 }
