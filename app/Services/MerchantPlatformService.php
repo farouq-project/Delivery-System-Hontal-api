@@ -59,6 +59,8 @@ class MerchantPlatformService
             'max_delivery_radius_km' => $s->max_delivery_radius_km,
             'auto_dispatch'          => (bool) ($s->auto_dispatch ?? false),
             'auto_geocode_enabled'   => (bool) ($s->auto_geocode_enabled ?? false),
+            'hide_driver_logout'     => (bool) ($s->hide_driver_logout ?? false),
+            'order_edit_pin'         => $s->order_edit_pin,
         ];
     }
 
@@ -70,6 +72,7 @@ class MerchantPlatformService
             'depot_address', 'depot_latitude', 'depot_longitude',
             'routing_algorithm', 'max_stops_per_driver', 'klotter_size',
             'max_delivery_radius_km', 'auto_dispatch', 'auto_geocode_enabled',
+            'hide_driver_logout', 'order_edit_pin',
         ];
         $s->update(array_intersect_key($data, array_flip($allowed)));
 

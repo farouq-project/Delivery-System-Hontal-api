@@ -101,6 +101,9 @@ Route::prefix('v1')->group(function () {
         Route::post('settings/clusters',        [SettingsController::class, 'storeCluster']);
         Route::delete('settings/clusters/{id}', [SettingsController::class, 'destroyCluster']);
 
+        // Payment methods (read-only for all authenticated roles — used in order creation)
+        Route::get('settings/payment-methods', [SettingsController::class, 'indexPaymentMethods']);
+
         // ─── Merchant Platform (Phase 3 — role-gated inside controller) ─
         Route::prefix('settings/platform')->group(function () {
             // Business Profile

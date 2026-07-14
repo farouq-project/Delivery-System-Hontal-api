@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\MerchantCashier;
 use App\Models\MerchantCluster;
+use App\Models\MerchantPaymentMethod;
 use App\Models\MerchantSetting;
 use App\Services\BusinessLogger;
 use Illuminate\Http\Request;
@@ -132,6 +133,21 @@ class SettingsController extends Controller
         $cluster->delete();
 
         return response()->json(null, 204);
+    }
+
+    // ─── Payment Methods (read-only for all authenticated roles) ──────────────
+
+    public function indexPaymentMethods(Request $request)
+    {
+        $merchantId = $request->user()->merchant_id;
+
+        $methods = MerchantPaymentMethod::where('merchant_id', $merchantId)
+            ->where('is_enabled', true)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get(['id', 'method_key', 'label', 'is_default']);
+
+        return response()->json(['data' => $methods]);
     }
 
     private function requireOwner(Request $request): void

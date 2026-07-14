@@ -85,6 +85,8 @@ class MerchantPlatformController extends Controller
             'max_delivery_radius_km' => 'sometimes|nullable|integer|min:1|max:500',
             'auto_dispatch'          => 'sometimes|boolean',
             'auto_geocode_enabled'   => 'sometimes|boolean',
+            'hide_driver_logout'     => 'sometimes|boolean',
+            'order_edit_pin'         => 'sometimes|nullable|string|regex:/^\d{3,6}$/',
         ]);
 
         return response()->json(['data' => $this->service->updateOperational($merchantId, $data)]);
