@@ -23,7 +23,7 @@ class CustomerHealthService
         }
 
         $daysSinceLast = $profile->last_order_at
-            ? (int) now()->diffInDays($profile->last_order_at)
+            ? (int) now()->diffInDays($profile->last_order_at, absolute: true)
             : 999;
 
         $successRate = $profile->total_orders > 0

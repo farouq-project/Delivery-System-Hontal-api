@@ -23,7 +23,7 @@ class RecalculateCustomerHealth extends Command
 
     public function handle(): int
     {
-        $merchantQuery = MerchantFeature::where('feature_key', 'customer_domain')
+        $merchantQuery = MerchantFeature::where('feature', 'customer_domain')
             ->where('is_enabled', true);
 
         if ($merchantId = $this->option('merchant')) {

@@ -9,7 +9,10 @@ return new class extends Migration
 {
     public function up(): void
     {
-        DB::statement("ALTER TABLE users MODIFY role ENUM('super_admin','developer','merchant_owner','dispatcher','driver') DEFAULT 'dispatcher'");
+        // SQLite (test env) stores ENUM as VARCHAR — MODIFY ENUM is MySQL-only
+        if (DB::connection()->getDriverName() !== 'sqlite') {
+            DB::statement("ALTER TABLE users MODIFY role ENUM('super_admin','developer','merchant_owner','dispatcher','driver') DEFAULT 'dispatcher'");
+        }
 
         Schema::table('delivery_orders', function (Blueprint $table) {
             $table->json('items')->nullable()->after('product_notes');
@@ -30,12 +33,16 @@ return new class extends Migration
             $table->unique(['merchant_id', 'name']);
         });
 
-        DB::statement("ALTER TABLE customers MODIFY default_address TEXT NULL");
+        if (DB::connection()->getDriverName() !== 'sqlite') {
+            DB::statement("ALTER TABLE customers MODIFY default_address TEXT NULL");
+        }
     }
 
     public function down(): void
     {
-        DB::statement("ALTER TABLE customers MODIFY default_address TEXT NOT NULL");
+        if (DB::connection()->getDriverName() !== 'sqlite') {
+            DB::statement("ALTER TABLE customers MODIFY default_address TEXT NOT NULL");
+        }
 
         Schema::dropIfExists('product_catalog');
 
@@ -47,6 +54,8 @@ return new class extends Migration
             $table->dropColumn('items');
         });
 
-        DB::statement("ALTER TABLE users MODIFY role ENUM('super_admin','merchant_owner','dispatcher','driver') DEFAULT 'dispatcher'");
+        if (DB::connection()->getDriverName() !== 'sqlite') {
+            DB::statement("ALTER TABLE users MODIFY role ENUM('super_admin','merchant_owner','dispatcher','driver') DEFAULT 'dispatcher'");
+        }
     }
 };

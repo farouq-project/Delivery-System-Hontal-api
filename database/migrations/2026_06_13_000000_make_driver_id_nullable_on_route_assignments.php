@@ -7,11 +7,15 @@ return new class extends Migration
 {
     public function up(): void
     {
-        DB::statement('ALTER TABLE route_assignments MODIFY driver_id BIGINT UNSIGNED NULL');
+        if (DB::connection()->getDriverName() !== 'sqlite') {
+            DB::statement('ALTER TABLE route_assignments MODIFY driver_id BIGINT UNSIGNED NULL');
+        }
     }
 
     public function down(): void
     {
-        DB::statement('ALTER TABLE route_assignments MODIFY driver_id BIGINT UNSIGNED NOT NULL');
+        if (DB::connection()->getDriverName() !== 'sqlite') {
+            DB::statement('ALTER TABLE route_assignments MODIFY driver_id BIGINT UNSIGNED NOT NULL');
+        }
     }
 };
