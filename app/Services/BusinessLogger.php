@@ -143,4 +143,56 @@ class BusinessLogger
             ...$meta,
         ]);
     }
+
+    public static function profileUpdated(
+        int    $merchantId,
+        int    $customerId,
+        string $action,
+    ): void {
+        self::write('customer.profile_updated', [
+            'merchant_id' => $merchantId,
+            'customer_id' => $customerId,
+            'action'      => $action,
+        ]);
+    }
+
+    public static function healthChanged(
+        int    $merchantId,
+        int    $customerId,
+        string $from,
+        string $to,
+    ): void {
+        self::write('customer.health_changed', [
+            'merchant_id' => $merchantId,
+            'customer_id' => $customerId,
+            'from'        => $from,
+            'to'          => $to,
+        ]);
+    }
+
+    public static function segmentChanged(
+        int    $merchantId,
+        int    $customerId,
+        string $from,
+        string $to,
+    ): void {
+        self::write('customer.segment_changed', [
+            'merchant_id' => $merchantId,
+            'customer_id' => $customerId,
+            'from'        => $from,
+            'to'          => $to,
+        ]);
+    }
+
+    public static function timelineEvent(
+        int    $merchantId,
+        int    $customerId,
+        string $eventType,
+    ): void {
+        self::write('customer.timeline_event', [
+            'merchant_id' => $merchantId,
+            'customer_id' => $customerId,
+            'event_type'  => $eventType,
+        ]);
+    }
 }

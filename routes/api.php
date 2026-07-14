@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CustomerController;
+use App\Http\Controllers\Api\V1\CustomerDomainController;
 use App\Http\Controllers\Api\V1\DriverAppController;
 use App\Http\Controllers\Api\V1\DriverController;
 use App\Http\Controllers\Api\V1\OrderController;
@@ -91,6 +92,25 @@ Route::prefix('v1')->group(function () {
         Route::post('settings/clusters',        [SettingsController::class, 'storeCluster']);
         Route::delete('settings/clusters/{id}', [SettingsController::class, 'destroyCluster']);
     });
+
+    // ─── CUSTOMER DOMAIN (Phase 2A — feature-gated per merchant) ────
+    Route::middleware(['auth:sanctum', 'role:super_admin,merchant_owner,dispatcher,kasir,developer'])
+        ->prefix('customer-domain')
+        ->group(function () {
+            // Per-customer: profile, timeline, metrics
+            Route::get('customers/{customerId}/profile',         [CustomerDomainController::class, 'profile']);
+            Route::get('customers/{customerId}/timeline',        [CustomerDomainController::class, 'timeline']);
+            Route::get('customers/{customerId}/metrics',         [CustomerDomainController::class, 'metrics']);
+            Route::get('customers/{customerId}/tags',            [CustomerDomainController::class, 'customerTags']);
+            Route::post('customers/{customerId}/tags/{tagId}',   [CustomerDomainController::class, 'assignTag']);
+            Route::delete('customers/{customerId}/tags/{tagId}', [CustomerDomainController::class, 'removeTag']);
+
+            // Tag management (write restricted to owner in controller)
+            Route::get('tags',             [CustomerDomainController::class, 'indexTags']);
+            Route::post('tags',            [CustomerDomainController::class, 'storeTag']);
+            Route::put('tags/{tagId}',     [CustomerDomainController::class, 'updateTag']);
+            Route::delete('tags/{tagId}',  [CustomerDomainController::class, 'destroyTag']);
+        });
 
     // ─── USER MANAGEMENT (developer / super_admin / merchant_owner) ───
     Route::middleware(['auth:sanctum', 'role:super_admin,developer,merchant_owner'])->group(function () {

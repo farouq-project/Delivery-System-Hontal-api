@@ -14,7 +14,8 @@ use Illuminate\Support\Facades\Cache;
  * cached per merchant for 5 minutes to avoid repeated DB lookups.
  *
  * Available feature keys:
- *   'customer_intelligence'  — advanced customer scoring and segmentation
+ *   'customer_domain'        — Phase 2A: customer profiles, timelines, health, segmentation
+ *   'customer_intelligence'  — advanced customer scoring (future)
  *   'insights'               — delivery analytics dashboards
  *   'growth'                 — multi-driver and multi-branch management
  *   'subscription'           — tiered billing and usage metering

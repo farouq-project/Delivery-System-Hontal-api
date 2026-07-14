@@ -5,6 +5,9 @@ namespace App\Models;
 use App\Models\Scopes\MerchantScope;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Customer extends Model
@@ -38,6 +41,22 @@ class Customer extends Model
     public function orders()
     {
         return $this->hasMany(DeliveryOrder::class)->orderByDesc('created_at');
+    }
+
+    public function profile(): HasOne
+    {
+        return $this->hasOne(CustomerProfile::class);
+    }
+
+    public function timelines(): HasMany
+    {
+        return $this->hasMany(CustomerTimeline::class)->orderByDesc('occurred_at');
+    }
+
+    public function tags(): BelongsToMany
+    {
+        return $this->belongsToMany(CustomerTag::class, 'customer_tag_assignments', 'customer_id', 'tag_id')
+            ->withPivot('assigned_by', 'created_at');
     }
 
     public function scopeForMerchant($query, int $merchantId)
