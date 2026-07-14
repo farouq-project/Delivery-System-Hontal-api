@@ -22,7 +22,7 @@ class SettingsController extends Controller
     {
         $data = $request->validate([
             'klotter_size'       => 'sometimes|integer|min:1|max:100',
-            'order_edit_pin'     => 'sometimes|string|regex:/^\d{3,6}$/',
+            'order_edit_pin'     => 'sometimes|nullable|string|regex:/^\d{3,6}$/',
             'depot_address'      => 'sometimes|nullable|string|max:500',
             'depot_latitude'     => 'sometimes|nullable|numeric|between:-90,90',
             'depot_longitude'    => 'sometimes|nullable|numeric|between:-180,180',

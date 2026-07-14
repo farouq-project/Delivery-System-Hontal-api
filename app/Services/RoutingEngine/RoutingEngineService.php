@@ -67,7 +67,8 @@ class RoutingEngineService
 
         // Sequence unassigned pending orders from the depot. Already-assigned
         // orders keep whatever sequence/driver they were given manually.
-        $scoredOrders = $this->scoreOrders($pendingOrders, $merchant, $depot);
+        $algorithm    = $settings->routing_algorithm ?? 'balanced';
+        $scoredOrders = $this->scoreOrders($pendingOrders, $merchant, $depot, $algorithm);
 
         Log::info('[ROUTE] Scoring results', [
             'route_date'   => $routeDate,
@@ -162,7 +163,8 @@ class RoutingEngineService
             ->where('status', 'pending')
             ->get();
 
-        $scoredNew = $this->scoreOrders($newOrders, $merchant, $depot);
+        $algorithm = $settings->routing_algorithm ?? 'balanced';
+        $scoredNew = $this->scoreOrders($newOrders, $merchant, $depot, $algorithm);
 
         foreach ($route->assignments as $assignment) {
             $remainingStops = $assignment->stops()
@@ -236,7 +238,7 @@ class RoutingEngineService
         return $route->fresh(['assignments.driver', 'assignments.stops.order']);
     }
 
-    private function scoreOrders(Collection $orders, Merchant $merchant, array $depot): array
+    private function scoreOrders(Collection $orders, Merchant $merchant, array $depot, string $algorithm = 'balanced'): array
     {
         // Distance scores only for orders that have coordinates
         $destinations = [];
@@ -268,12 +270,18 @@ class RoutingEngineService
             $wn = $this->windowScorer->score($order);
             $vs = $this->vipScorer->score($order, $merchant);
 
+            $total = match ($algorithm) {
+                'distance' => $ds,
+                'vip'      => $vs * 3 + $ds,
+                default    => $ds + $ws + $wn + $vs, // balanced
+            };
+
             $scored[$order->id] = [
                 'distance_score' => $ds,
                 'waiting_score'  => $ws,
                 'window_score'   => $wn,
                 'vip_score'      => $vs,
-                'total_score'    => $ds + $ws + $wn + $vs,
+                'total_score'    => $total,
                 'batch_number'   => 1, // overridden below
             ];
         }

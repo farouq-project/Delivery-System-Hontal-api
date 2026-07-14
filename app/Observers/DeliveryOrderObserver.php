@@ -17,6 +17,16 @@ class DeliveryOrderObserver
         private readonly FeatureManager          $featureManager,
     ) {}
 
+    public function deleted(DeliveryOrder $order): void
+    {
+        $this->recalculateProfile($order);
+    }
+
+    public function restored(DeliveryOrder $order): void
+    {
+        $this->recalculateProfile($order);
+    }
+
     public function created(DeliveryOrder $order): void
     {
         if (!$order->customer_id) {
@@ -42,6 +52,30 @@ class DeliveryOrderObserver
                 'order_value'  => $order->order_value,
             ]);
 
+            $this->profileService->recalculate($customer);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+    }
+
+    private function recalculateProfile(DeliveryOrder $order): void
+    {
+        if (!$order->customer_id) {
+            return;
+        }
+
+        if (!$this->featureManager->isEnabled($order->merchant_id, 'customer_domain')) {
+            return;
+        }
+
+        $customer = Customer::withoutGlobalScope(MerchantScope::class)
+            ->find($order->customer_id);
+
+        if (!$customer) {
+            return;
+        }
+
+        try {
             $this->profileService->recalculate($customer);
         } catch (\Throwable $e) {
             report($e);

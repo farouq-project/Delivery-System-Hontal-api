@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\DeliveryOrder;
 use App\Models\Driver;
 use App\Models\MerchantCashier;
+use App\Models\MerchantPaymentMethod;
 use App\Models\MerchantSetting;
 use App\Models\ProductCatalog;
 use App\Models\Route;
@@ -41,6 +42,7 @@ class OrderController extends Controller
             ->when($request->date,           fn($q, $d) => $q->where('requested_delivery_date', $d))
             ->when($request->date_from,      fn($q, $d) => $q->where('requested_delivery_date', '>=', $d))
             ->when($request->date_to,        fn($q, $d) => $q->where('requested_delivery_date', '<=', $d))
+            ->when($request->created_date,   fn($q, $d) => $q->whereDate('order_created_at', $d))
             ->when($request->payment_method, fn($q, $m) => $q->where('payment_method', $m))
             ->when($request->search, fn($q, $s) => $q->where(function($q) use ($s) {
                 $q->where('customer_name', 'like', "%{$s}%")
@@ -65,10 +67,15 @@ class OrderController extends Controller
 
         $merchantId    = $request->user()->merchant_id;
         $cashierNames  = MerchantCashier::namesForMerchant($merchantId);
+        $paymentKeys   = MerchantPaymentMethod::keysForMerchant($merchantId);
 
         $cashierRule = empty($cashierNames)
             ? 'nullable|string|max:100'
             : ['nullable', Rule::in($cashierNames)];
+
+        $paymentRule = empty($paymentKeys)
+            ? 'nullable|in:cash,transfer,qris,bayar_di_toko'
+            : ['nullable', Rule::in($paymentKeys)];
 
         $data = $request->validate([
             'customer_id'              => 'nullable|integer',
@@ -90,7 +97,7 @@ class OrderController extends Controller
             'requested_delivery_end'   => 'nullable|date_format:H:i',
             'driver_id'                => 'nullable|integer|exists:drivers,id',
             'cashier_name'             => $cashierRule,
-            'payment_method'           => 'nullable|in:cash,transfer,qris,bayar_di_toko',
+            'payment_method'           => $paymentRule,
         ]);
 
         // Fill customer snapshot from selected customer if not provided
@@ -222,9 +229,15 @@ class OrderController extends Controller
         $this->normalizeTimeFields($request);
 
         $cashierNames = MerchantCashier::namesForMerchant($order->merchant_id);
-        $cashierRule  = empty($cashierNames)
+        $paymentKeys  = MerchantPaymentMethod::keysForMerchant($order->merchant_id);
+
+        $cashierRule = empty($cashierNames)
             ? 'nullable|string|max:100'
             : ['nullable', Rule::in($cashierNames)];
+
+        $paymentRule = empty($paymentKeys)
+            ? 'nullable|in:cash,transfer,qris,bayar_di_toko'
+            : ['nullable', Rule::in($paymentKeys)];
 
         $data = $request->validate([
             'product_name'             => 'sometimes|string',
@@ -244,7 +257,7 @@ class OrderController extends Controller
             'customer_name'       => 'sometimes|string|max:255',
             'customer_phone'      => 'nullable|string|max:20',
             'cashier_name'        => $cashierRule,
-            'payment_method'      => 'nullable|in:cash,transfer,qris,bayar_di_toko',
+            'payment_method'      => $paymentRule,
         ]);
 
         if ($order->status === 'in_transit') {

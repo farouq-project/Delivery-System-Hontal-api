@@ -20,4 +20,13 @@ class MerchantPaymentMethod extends Model
     {
         return $this->belongsTo(Merchant::class);
     }
+
+    public static function keysForMerchant(int $merchantId): array
+    {
+        return static::where('merchant_id', $merchantId)
+            ->where('is_enabled', true)
+            ->orderBy('sort_order')
+            ->pluck('method_key')
+            ->all();
+    }
 }
