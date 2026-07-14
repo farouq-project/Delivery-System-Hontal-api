@@ -13,6 +13,7 @@ use App\Models\ProductCatalog;
 use App\Models\Route;
 use App\Models\RouteAssignment;
 use App\Models\RouteStop;
+use App\Models\Scopes\MerchantScope;
 use App\Services\Geocoding\GoogleGeocodingService;
 use App\Services\OrderService;
 use Illuminate\Http\Request;
@@ -119,8 +120,20 @@ class OrderController extends Controller
             }
         }
 
-        $today       = now()->format('Ymd');
-        $sequence    = Cache::increment("order_seq:{$merchantId}:{$today}");
+        $today    = now()->format('Ymd');
+        $cacheKey = "order_seq:{$merchantId}:{$today}";
+
+        // Seed from DB on cache miss so a cache:clear never causes duplicate-key collisions
+        if (!Cache::has($cacheKey)) {
+            $maxOrder = DeliveryOrder::withoutGlobalScope(MerchantScope::class)
+                ->where('merchant_id', $merchantId)
+                ->where('order_number', 'like', "ORD-{$today}-%")
+                ->max('order_number');
+            $seed = $maxOrder ? (int) substr($maxOrder, -4) : 0;
+            Cache::put($cacheKey, $seed, now()->endOfDay());
+        }
+
+        $sequence    = Cache::increment($cacheKey);
         $orderNumber = "ORD-{$today}-" . str_pad($sequence, 4, '0', STR_PAD_LEFT);
 
         $order = DeliveryOrder::create([
