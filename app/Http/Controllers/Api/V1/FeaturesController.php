@@ -18,6 +18,7 @@ class FeaturesController extends Controller
             return response()->json(['data' => [
                 'customer_domain'     => true,
                 'executive_dashboard' => true,
+                'merchant_platform'   => true,
             ]]);
         }
 
@@ -27,12 +28,14 @@ class FeaturesController extends Controller
             return response()->json(['data' => [
                 'customer_domain'     => false,
                 'executive_dashboard' => false,
+                'merchant_platform'   => false,
             ]]);
         }
 
         return response()->json(['data' => [
             'customer_domain'     => $this->features->isEnabled($merchantId, 'customer_domain'),
             'executive_dashboard' => $this->features->isEnabled($merchantId, 'executive_dashboard'),
+            'merchant_platform'   => $this->features->isEnabled($merchantId, 'merchant_platform'),
         ]]);
     }
 }

@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\CustomerDomainController;
 use App\Http\Controllers\Api\V1\ExecutiveDashboardController;
 use App\Http\Controllers\Api\V1\FeaturesController;
+use App\Http\Controllers\Api\V1\MerchantPlatformController;
 use App\Http\Controllers\Api\V1\DriverAppController;
 use App\Http\Controllers\Api\V1\DriverController;
 use App\Http\Controllers\Api\V1\OrderController;
@@ -99,6 +100,45 @@ Route::prefix('v1')->group(function () {
         Route::get('settings/clusters',         [SettingsController::class, 'indexClusters']);
         Route::post('settings/clusters',        [SettingsController::class, 'storeCluster']);
         Route::delete('settings/clusters/{id}', [SettingsController::class, 'destroyCluster']);
+
+        // ─── Merchant Platform (Phase 3 — role-gated inside controller) ─
+        Route::prefix('settings/platform')->group(function () {
+            // Business Profile
+            Route::get('profile',  [MerchantPlatformController::class, 'getProfile']);
+            Route::patch('profile', [MerchantPlatformController::class, 'updateProfile']);
+
+            // Operational
+            Route::get('operational',  [MerchantPlatformController::class, 'getOperational']);
+            Route::patch('operational', [MerchantPlatformController::class, 'updateOperational']);
+
+            // Business Hours
+            Route::get('hours',  [MerchantPlatformController::class, 'getHours']);
+            Route::patch('hours', [MerchantPlatformController::class, 'updateHours']);
+
+            // Invoice
+            Route::get('invoice',  [MerchantPlatformController::class, 'getInvoice']);
+            Route::patch('invoice', [MerchantPlatformController::class, 'updateInvoice']);
+
+            // Tracking
+            Route::get('tracking',  [MerchantPlatformController::class, 'getTracking']);
+            Route::patch('tracking', [MerchantPlatformController::class, 'updateTracking']);
+
+            // Notifications
+            Route::get('notifications',  [MerchantPlatformController::class, 'getNotifications']);
+            Route::patch('notifications', [MerchantPlatformController::class, 'updateNotifications']);
+
+            // Payment Methods
+            Route::get('payment-methods',            [MerchantPlatformController::class, 'indexPaymentMethods']);
+            Route::post('payment-methods',           [MerchantPlatformController::class, 'storePaymentMethod']);
+            Route::patch('payment-methods/reorder',  [MerchantPlatformController::class, 'reorderPaymentMethods']);
+            Route::patch('payment-methods/{id}',     [MerchantPlatformController::class, 'updatePaymentMethod']);
+
+            // Branches
+            Route::get('branches',         [MerchantPlatformController::class, 'indexBranches']);
+            Route::post('branches',        [MerchantPlatformController::class, 'storeBranch']);
+            Route::patch('branches/{id}',  [MerchantPlatformController::class, 'updateBranch']);
+            Route::delete('branches/{id}', [MerchantPlatformController::class, 'destroyBranch']);
+        });
     });
 
     // ─── CUSTOMER DOMAIN (Phase 2A — feature-gated per merchant) ────

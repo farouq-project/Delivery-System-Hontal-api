@@ -12,6 +12,8 @@ class Merchant extends Model
 
     protected $fillable = [
         'ulid', 'company_name', 'slug', 'address', 'phone', 'email', 'timezone', 'logo_path',
+        // Phase 3 — Merchant Platform
+        'tax_number', 'invoice_footer', 'brand_color',
     ];
 
     public function users()
