@@ -6,13 +6,11 @@ use App\Events\StopCompleted;
 use App\Http\Controllers\Controller;
 use App\Models\DeliveryOrder;
 use App\Models\Driver;
-use App\Models\MerchantSetting;
 use App\Models\DriverLocation;
 use App\Models\ProofOfDelivery;
 use App\Models\RouteStop;
 use App\Services\OrderService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 
 class DriverAppController extends Controller
 {
@@ -42,10 +40,8 @@ class DriverAppController extends Controller
 
     public function today(Request $request)
     {
-        $driver = $this->getDriver($request);
-
-        $hideDriverLogout = (bool) MerchantSetting::where('merchant_id', $driver->merchant_id)
-            ->value('hide_driver_logout');
+        $driver    = $this->getDriver($request);
+        $canLogout = (bool) ($request->user()->can_logout ?? true);
 
         $assignment = $driver->routeAssignments()
             ->whereHas('route', fn($q) => $q->where('route_date', today()))
@@ -57,12 +53,12 @@ class DriverAppController extends Controller
             ->first();
 
         if (!$assignment) {
-            return response()->json(['data' => ['stops' => [], 'total_stops' => 0, 'completed_stops' => 0, 'hide_driver_logout' => $hideDriverLogout]]);
+            return response()->json(['data' => ['stops' => [], 'total_stops' => 0, 'completed_stops' => 0, 'can_logout' => $canLogout]]);
         }
 
         return response()->json([
             'data' => [
-                'hide_driver_logout'  => $hideDriverLogout,
+                'can_logout'          => $canLogout,
                 'route_assignment_id' => $assignment->id,
                 'route_date'          => today()->toDateString(),
                 'total_stops'         => $assignment->total_stops,
