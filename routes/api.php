@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\BusinessIntelligenceController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\CustomerDomainController;
 use App\Http\Controllers\Api\V1\ExecutiveDashboardController;
@@ -161,6 +162,20 @@ Route::prefix('v1')->group(function () {
             Route::post('tags',            [CustomerDomainController::class, 'storeTag']);
             Route::put('tags/{tagId}',     [CustomerDomainController::class, 'updateTag']);
             Route::delete('tags/{tagId}',  [CustomerDomainController::class, 'destroyTag']);
+        });
+
+    // ─── BUSINESS INTELLIGENCE (Phase 4.1 — role-gated inside controller) ───
+    Route::middleware(['auth:sanctum', 'role:super_admin,merchant_owner,developer'])
+        ->prefix('bi')
+        ->group(function () {
+            Route::get('overview',   [BusinessIntelligenceController::class, 'overview']);
+            Route::get('customers',  [BusinessIntelligenceController::class, 'customers']);
+            Route::get('operations', [BusinessIntelligenceController::class, 'operations']);
+            Route::get('drivers',    [BusinessIntelligenceController::class, 'drivers']);
+            Route::get('branches',   [BusinessIntelligenceController::class, 'branches']);
+            Route::get('products',   [BusinessIntelligenceController::class, 'products']);
+            Route::get('areas',      [BusinessIntelligenceController::class, 'areas']);
+            Route::get('attention',  [BusinessIntelligenceController::class, 'attention']);
         });
 
     // ─── USER MANAGEMENT (developer / super_admin / merchant_owner) ───

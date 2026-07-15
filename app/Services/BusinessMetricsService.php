@@ -242,4 +242,233 @@ class BusinessMetricsService
             ])
             ->all();
     }
+
+    // ── BI Workspace Sections (Phase 4.1) ─────────────────────────────────────
+
+    /**
+     * 60-second business overview: highlights from every section.
+     */
+    public function getOverview(int $merchantId, string $timezone): array
+    {
+        $operationsToday = $this->getOperationsToday($merchantId, $timezone);
+        $businessMonth   = $this->getBusinessThisMonth($merchantId, $timezone);
+        $customerHealth  = $this->getCustomerHealth($merchantId, $timezone);
+        $attention       = $this->getRequiresAttention($merchantId);
+
+        $topCluster  = $this->repository->clusterSummary($merchantId, 1)->first();
+        $topCustomer = $this->repository->topCustomers($merchantId, 1)->first();
+        $topDriver   = $this->repository->driverRanking($merchantId, 1)->first();
+        $topProduct  = $this->repository->productRanking($merchantId, 1)->first();
+
+        return [
+            'operations_today'    => $operationsToday,
+            'business_this_month' => $businessMonth,
+            'customer_health'     => $customerHealth,
+            'top_cluster'         => $topCluster ? [
+                'cluster' => $topCluster->cluster,
+                'revenue' => (float) $topCluster->revenue,
+                'orders'  => (int) $topCluster->total_orders,
+            ] : null,
+            'top_customer'        => $topCustomer ? [
+                'customer_name' => $topCustomer->customer_name,
+                'spending'      => (float) $topCustomer->total_spending,
+                'orders'        => (int) $topCustomer->total_orders,
+            ] : null,
+            'top_driver'          => $topDriver ? [
+                'driver_name' => $topDriver->driver_name,
+                'deliveries'  => (int) $topDriver->completed,
+                'revenue'     => (float) $topDriver->revenue,
+            ] : null,
+            'top_product'         => $topProduct ? [
+                'product_name' => $topProduct->product_name,
+                'orders'       => (int) $topProduct->total_orders,
+            ] : null,
+            'requires_attention'  => $attention,
+        ];
+    }
+
+    /**
+     * Deep customer breakdown: counts, top by revenue, top by frequency.
+     */
+    public function getCustomerInsights(int $merchantId, string $timezone): array
+    {
+        $from      = Carbon::now($timezone)->startOfMonth();
+        $to        = Carbon::now($timezone)->endOfMonth();
+        $hasDomain = $this->features->isEnabled($merchantId, 'customer_domain');
+
+        return [
+            'total'          => $this->repository->totalCustomers($merchantId),
+            'new_this_month' => $this->repository->newCustomersForPeriod($merchantId, $from, $to),
+            'repeat'         => $this->repository->repeatCustomerCount($merchantId),
+            'vip'            => $this->repository->vipCustomerCount($merchantId),
+            'dormant'        => $hasDomain ? $this->repository->dormantCustomerCountFromProfiles($merchantId) : null,
+            'lost'           => $hasDomain ? $this->repository->lostCustomerCountFromProfiles($merchantId) : null,
+            'without_gps'    => $this->repository->customersWithoutGpsCount($merchantId),
+            'top_by_revenue' => $this->repository->topCustomers($merchantId, 10)
+                ->map(fn($r) => [
+                    'customer_id'    => $r->customer_id,
+                    'customer_name'  => $r->customer_name,
+                    'total_orders'   => (int) $r->total_orders,
+                    'total_spending' => (float) $r->total_spending,
+                ])->values()->all(),
+            'top_by_frequency' => $this->repository->topCustomersByFrequency($merchantId, 10)
+                ->map(fn($r) => [
+                    'customer_id'    => $r->customer_id,
+                    'customer_name'  => $r->customer_name,
+                    'total_orders'   => (int) $r->total_orders,
+                    'total_spending' => (float) $r->total_spending,
+                ])->values()->all(),
+        ];
+    }
+
+    /**
+     * Operations deep dive: queue sizes, delays, success rate, driver status.
+     */
+    public function getOperationsInsights(int $merchantId, string $timezone): array
+    {
+        $today    = Carbon::today($timezone);
+        $terminal = $this->repository->terminalCountsForDay($merchantId, $today);
+
+        $successRate = $terminal['total'] > 0
+            ? round(BusinessRuleRegistry::successRate($terminal['delivered'], $terminal['total']) * 100, 1)
+            : null;
+
+        return [
+            'pending_orders'     => $this->repository->pendingOrderCount($merchantId),
+            'pending_assignment' => $this->repository->pendingAssignmentCount($merchantId),
+            'delayed_deliveries' => $this->repository->delayedDeliveryCount($merchantId),
+            'failed_today'       => $this->repository->failedTodayCount($merchantId),
+            'total_orders_today' => $this->repository->orderCountForDay($merchantId, $today),
+            'delivered_today'    => $terminal['delivered'],
+            'success_rate_today' => $successRate,
+            'active_drivers'     => $this->repository->activeDriverCount($merchantId),
+            'offline_drivers'    => $this->repository->offlineActiveDrivers($merchantId)
+                ->map(fn($d) => ['id' => $d->id, 'driver_name' => $d->driver_name])
+                ->values()->all(),
+        ];
+    }
+
+    /**
+     * Driver ranking by completed deliveries with success rate.
+     */
+    public function getDriverInsights(int $merchantId): array
+    {
+        $ranking = $this->repository->driverRanking($merchantId, 20)
+            ->map(function ($row) {
+                $successRate = (int) $row->total_assigned > 0
+                    ? round(
+                        BusinessRuleRegistry::successRate((int) $row->completed, (int) $row->total_assigned) * 100,
+                        1
+                    )
+                    : null;
+
+                return [
+                    'driver_id'      => $row->driver_id,
+                    'driver_name'    => $row->driver_name,
+                    'status'         => $row->status,
+                    'completed'      => (int) $row->completed,
+                    'failed'         => (int) $row->failed,
+                    'revenue'        => (float) $row->revenue,
+                    'total_assigned' => (int) $row->total_assigned,
+                    'success_rate'   => $successRate,
+                ];
+            })->values()->all();
+
+        return [
+            'ranking'        => $ranking,
+            'total_drivers'  => count($ranking),
+            'offline_drivers' => $this->repository->offlineActiveDrivers($merchantId)
+                ->map(fn($d) => ['id' => $d->id, 'driver_name' => $d->driver_name])
+                ->values()->all(),
+        ];
+    }
+
+    /**
+     * Cluster/branch breakdown: revenue, orders, success rate, avg order value.
+     */
+    public function getBranchInsights(int $merchantId): array
+    {
+        $clusters = $this->repository->clusterSummary($merchantId, 20)
+            ->map(function ($row) {
+                $successRate = (int) $row->terminal_cnt > 0
+                    ? round(
+                        BusinessRuleRegistry::successRate((int) $row->deliveries, (int) $row->terminal_cnt) * 100,
+                        1
+                    )
+                    : null;
+                $avgOrder = (int) $row->deliveries > 0
+                    ? round((float) $row->revenue / (int) $row->deliveries)
+                    : 0;
+
+                return [
+                    'cluster'      => $row->cluster,
+                    'total_orders' => (int) $row->total_orders,
+                    'revenue'      => (float) $row->revenue,
+                    'deliveries'   => (int) $row->deliveries,
+                    'success_rate' => $successRate,
+                    'avg_order'    => (float) $avgOrder,
+                ];
+            })->values()->all();
+
+        return [
+            'clusters'    => $clusters,
+            'top_cluster' => !empty($clusters) ? $clusters[0] : null,
+        ];
+    }
+
+    /**
+     * Product ranking by order count and revenue.
+     * has_data is false when no product_name data exists.
+     */
+    public function getProductInsights(int $merchantId): array
+    {
+        $raw = $this->repository->productRanking($merchantId, 20);
+
+        $byOrders = $raw->map(fn($r) => [
+            'product_name' => $r->product_name,
+            'total_orders' => (int) $r->total_orders,
+            'delivered'    => (int) $r->delivered,
+            'revenue'      => (float) $r->revenue,
+        ])->values()->all();
+
+        $byRevenue = collect($byOrders)->sortByDesc('revenue')->values()->all();
+
+        return [
+            'has_data'    => count($byOrders) > 0,
+            'top_selling' => $byOrders,
+            'top_revenue' => $byRevenue,
+        ];
+    }
+
+    /**
+     * Geographic area breakdown: orders, revenue, unique customers per cluster.
+     */
+    public function getAreaInsights(int $merchantId): array
+    {
+        $areas = $this->repository->areaMetrics($merchantId)
+            ->map(function ($row) {
+                $successRate = (int) $row->terminal_cnt > 0
+                    ? round(
+                        BusinessRuleRegistry::successRate((int) $row->delivered, (int) $row->terminal_cnt) * 100,
+                        1
+                    )
+                    : null;
+
+                return [
+                    'cluster'          => $row->cluster,
+                    'total_orders'     => (int) $row->total_orders,
+                    'revenue'          => (float) $row->revenue,
+                    'delivered'        => (int) $row->delivered,
+                    'success_rate'     => $successRate,
+                    'unique_customers' => (int) $row->unique_customers,
+                ];
+            })->values()->all();
+
+        $topArea = collect($areas)->sortByDesc('revenue')->first();
+
+        return [
+            'areas'    => $areas,
+            'top_area' => $topArea,
+        ];
+    }
 }

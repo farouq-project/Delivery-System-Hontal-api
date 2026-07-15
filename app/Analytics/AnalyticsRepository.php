@@ -263,4 +263,141 @@ class AnalyticsRepository
             ->whereDate('failed_at', Carbon::today())
             ->count();
     }
+
+    // ── Operations ────────────────────────────────────────────────────────────
+
+    public function pendingOrderCount(int $merchantId): int
+    {
+        return DeliveryOrder::where('merchant_id', $merchantId)
+            ->where('status', 'pending')
+            ->count();
+    }
+
+    public function pendingAssignmentCount(int $merchantId): int
+    {
+        return DeliveryOrder::where('merchant_id', $merchantId)
+            ->where('status', 'pending')
+            ->whereNull('driver_id')
+            ->count();
+    }
+
+    // ── Driver Ranking ────────────────────────────────────────────────────────
+
+    /**
+     * Per-driver aggregated performance across all time.
+     * Returns: driver_id, driver_name, status, completed, failed, revenue, total_assigned
+     */
+    public function driverRanking(int $merchantId, int $limit = 20): Collection
+    {
+        return DB::table('delivery_orders as o')
+            ->join('drivers as d', 'd.id', '=', 'o.driver_id')
+            ->where('o.merchant_id', $merchantId)
+            ->whereNull('o.deleted_at')
+            ->where('d.is_active', true)
+            ->select([
+                'd.id as driver_id',
+                'd.driver_name',
+                'd.status',
+                DB::raw('COUNT(CASE WHEN o.status = "delivered" THEN 1 END) as completed'),
+                DB::raw('COALESCE(SUM(CASE WHEN o.status = "delivered" THEN o.order_value ELSE 0 END), 0) as revenue'),
+                DB::raw('COUNT(CASE WHEN o.status = "failed" THEN 1 END) as failed'),
+                DB::raw('COUNT(o.id) as total_assigned'),
+            ])
+            ->groupBy('d.id', 'd.driver_name', 'd.status')
+            ->orderByDesc('completed')
+            ->limit($limit)
+            ->get();
+    }
+
+    // ── Product Ranking ───────────────────────────────────────────────────────
+
+    /**
+     * Per-product aggregated metrics grouped by product_name.
+     * Returns: product_name, total_orders, delivered, revenue
+     */
+    public function productRanking(int $merchantId, int $limit = 20): Collection
+    {
+        return DB::table('delivery_orders')
+            ->where('merchant_id', $merchantId)
+            ->whereNull('deleted_at')
+            ->whereNotNull('product_name')
+            ->where('product_name', '!=', '')
+            ->select([
+                'product_name',
+                DB::raw('COUNT(*) as total_orders'),
+                DB::raw('COUNT(CASE WHEN status = "delivered" THEN 1 END) as delivered'),
+                DB::raw('COALESCE(SUM(CASE WHEN status = "delivered" THEN order_value ELSE 0 END), 0) as revenue'),
+            ])
+            ->groupBy('product_name')
+            ->orderByDesc('total_orders')
+            ->limit($limit)
+            ->get();
+    }
+
+    // ── Customer Insights ─────────────────────────────────────────────────────
+
+    public function lostCustomerCountFromProfiles(int $merchantId): int
+    {
+        return CustomerProfile::where('merchant_id', $merchantId)
+            ->where('health_status', 'lost')
+            ->count();
+    }
+
+    public function vipCustomerCount(int $merchantId): int
+    {
+        return Customer::where('merchant_id', $merchantId)
+            ->whereIn('vip_level', BusinessRuleRegistry::SEGMENT_VIP_LEVELS)
+            ->count();
+    }
+
+    /**
+     * Top N customers by delivered order frequency.
+     * Returns: customer_id, customer_name, total_orders, total_spending
+     */
+    public function topCustomersByFrequency(int $merchantId, int $limit = 10): Collection
+    {
+        return DB::table('delivery_orders')
+            ->where('merchant_id', $merchantId)
+            ->where('status', BusinessRuleRegistry::REVENUE_STATUS)
+            ->whereNull('deleted_at')
+            ->whereNotNull('customer_id')
+            ->select([
+                'customer_id',
+                'customer_name',
+                DB::raw('COUNT(*) as total_orders'),
+                DB::raw('COALESCE(SUM(order_value), 0) as total_spending'),
+            ])
+            ->groupBy('customer_id', 'customer_name')
+            ->orderByDesc('total_orders')
+            ->limit($limit)
+            ->get();
+    }
+
+    // ── Area Metrics ──────────────────────────────────────────────────────────
+
+    /**
+     * Per-cluster aggregated metrics across all time (no limit).
+     * Returns: cluster, total_orders, revenue, delivered, terminal_cnt, unique_customers
+     */
+    public function areaMetrics(int $merchantId): Collection
+    {
+        return DB::table('delivery_orders as o')
+            ->leftJoin('customers as c', function ($join) {
+                $join->on('o.customer_id', '=', 'c.id')
+                     ->whereNull('c.deleted_at');
+            })
+            ->where('o.merchant_id', $merchantId)
+            ->whereNull('o.deleted_at')
+            ->select([
+                DB::raw('COALESCE(c.cluster, "No Cluster") as cluster'),
+                DB::raw('COUNT(o.id) as total_orders'),
+                DB::raw('COALESCE(SUM(CASE WHEN o.status = "delivered" THEN o.order_value ELSE 0 END), 0) as revenue'),
+                DB::raw('COUNT(CASE WHEN o.status = "delivered" THEN 1 END) as delivered'),
+                DB::raw('COUNT(CASE WHEN o.status IN ("delivered", "failed", "cancelled") THEN 1 END) as terminal_cnt'),
+                DB::raw('COUNT(DISTINCT o.customer_id) as unique_customers'),
+            ])
+            ->groupBy('c.cluster')
+            ->orderByDesc('revenue')
+            ->get();
+    }
 }
