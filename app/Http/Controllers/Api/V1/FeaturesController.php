@@ -16,9 +16,10 @@ class FeaturesController extends Controller
 
         if (in_array($user->role, ['super_admin', 'developer'])) {
             return response()->json(['data' => [
-                'customer_domain'     => true,
-                'executive_dashboard' => true,
-                'merchant_platform'   => true,
+                'customer_domain'        => true,
+                'executive_dashboard'    => true,
+                'merchant_platform'      => true,
+                'business_intelligence'  => true,
             ]]);
         }
 
@@ -26,16 +27,18 @@ class FeaturesController extends Controller
 
         if (!$merchantId) {
             return response()->json(['data' => [
-                'customer_domain'     => false,
-                'executive_dashboard' => false,
-                'merchant_platform'   => false,
+                'customer_domain'        => false,
+                'executive_dashboard'    => false,
+                'merchant_platform'      => false,
+                'business_intelligence'  => false,
             ]]);
         }
 
         return response()->json(['data' => [
-            'customer_domain'     => $this->features->isEnabled($merchantId, 'customer_domain'),
-            'executive_dashboard' => $this->features->isEnabled($merchantId, 'executive_dashboard'),
-            'merchant_platform'   => $this->features->isEnabled($merchantId, 'merchant_platform'),
+            'customer_domain'        => $this->features->isEnabled($merchantId, 'customer_domain'),
+            'executive_dashboard'    => $this->features->isEnabled($merchantId, 'executive_dashboard'),
+            'merchant_platform'      => $this->features->isEnabled($merchantId, 'merchant_platform'),
+            'business_intelligence'  => $this->features->isEnabled($merchantId, 'business_intelligence'),
         ]]);
     }
 }
