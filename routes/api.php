@@ -14,7 +14,18 @@ use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\RouteController;
 use App\Http\Controllers\Api\V1\SettingsController;
 use App\Http\Controllers\Api\V1\UserController;
+use App\Http\Controllers\Api\V1\Admin\ApplicationController;
+use App\Http\Controllers\Api\V1\Admin\MerchantController as AdminMerchantController;
+use App\Http\Controllers\Api\V1\Admin\PlanController;
+use App\Http\Controllers\Api\V1\Admin\SubscriptionController;
+use App\Http\Controllers\Api\Public\PublicController;
 use Illuminate\Support\Facades\Route;
+
+// ─── PUBLIC ROUTES (no auth) ──────────────────────────────────────────────────
+Route::prefix('public')->group(function () {
+    Route::post('register-interest', [PublicController::class, 'registerInterest']);
+    Route::get('plans',              [PublicController::class, 'plans']);
+});
 
 Route::prefix('v1')->group(function () {
 
@@ -182,6 +193,34 @@ Route::prefix('v1')->group(function () {
     Route::middleware(['auth:sanctum', 'role:super_admin,developer,merchant_owner'])->group(function () {
         Route::post('users/{user}/reset-password', [UserController::class, 'resetPassword']);
         Route::apiResource('users', UserController::class);
+    });
+
+    // ─── SUPER ADMIN PLATFORM ROUTES (Phase 5.2) ─────────────────────
+    Route::middleware(['auth:sanctum', 'role:super_admin'])->prefix('admin')->group(function () {
+
+        // Applications
+        Route::get('applications',                          [ApplicationController::class, 'index']);
+        Route::get('applications/{application}',            [ApplicationController::class, 'show']);
+        Route::patch('applications/{application}/approve',  [ApplicationController::class, 'approve']);
+        Route::patch('applications/{application}/reject',   [ApplicationController::class, 'reject']);
+        Route::patch('applications/{application}/notes',    [ApplicationController::class, 'notes']);
+        Route::delete('applications/{application}',         [ApplicationController::class, 'destroy']);
+
+        // Merchant directory & management
+        Route::get('merchants',                             [AdminMerchantController::class, 'index']);
+        Route::get('merchants/{merchant}',                  [AdminMerchantController::class, 'show']);
+        Route::patch('merchants/{merchant}/status',         [AdminMerchantController::class, 'updateStatus']);
+        Route::get('merchants/{merchant}/users',            [AdminMerchantController::class, 'users']);
+        Route::get('merchants/{merchant}/delivery-summary', [AdminMerchantController::class, 'deliverySummary']);
+
+        // Plans
+        Route::get('plans',                 [PlanController::class, 'index']);
+        Route::get('plans/{plan}',          [PlanController::class, 'show']);
+        Route::patch('plans/{plan}/toggle', [PlanController::class, 'toggle']);
+
+        // Subscriptions
+        Route::get('subscriptions',               [SubscriptionController::class, 'index']);
+        Route::get('subscriptions/{subscription}',[SubscriptionController::class, 'show']);
     });
 
     // ─── DRIVER APP ROUTES ────────────────────────────────────────────

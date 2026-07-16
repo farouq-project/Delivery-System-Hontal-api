@@ -66,6 +66,16 @@ class Merchant extends Model
         return $this->hasMany(VipConfig::class);
     }
 
+    public function subscription()
+    {
+        return $this->hasOne(MerchantSubscription::class)->latestOfMany();
+    }
+
+    public function branches()
+    {
+        return $this->hasMany(MerchantBranch::class);
+    }
+
     public function getVipScore(string $level): int
     {
         static $defaults = ['standard' => 0, 'silver' => 50, 'gold' => 100, 'platinum' => 200];
