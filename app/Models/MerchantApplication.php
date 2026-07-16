@@ -10,14 +10,14 @@ class MerchantApplication extends Model
 {
     use HasFactory, SoftDeletes;
 
-    // Valid status values
-    public const STATUSES = ['pending', 'approved', 'rejected', 'cancelled', 'converted'];
+    public const STATUSES = ['pending', 'review', 'approved', 'rejected', 'cancelled', 'converted'];
 
     protected $fillable = [
         'company_name', 'owner_name', 'email', 'phone',
         'city', 'business_type', 'branch_count',
         'estimated_monthly_deliveries', 'selected_plan',
-        'notes', 'status', 'approved_by', 'approved_at',
+        'notes', 'rejection_reason', 'internal_notes',
+        'status', 'approved_by', 'approved_at',
     ];
 
     protected $casts = [
@@ -34,5 +34,10 @@ class MerchantApplication extends Model
     public function isPending(): bool
     {
         return $this->status === 'pending';
+    }
+
+    public function isActionable(): bool
+    {
+        return in_array($this->status, ['pending', 'review']);
     }
 }

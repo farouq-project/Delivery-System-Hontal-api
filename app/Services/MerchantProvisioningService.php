@@ -12,6 +12,7 @@ use App\Models\MerchantSubscription;
 use App\Models\PlatformPlan;
 use App\Models\User;
 use App\Models\VipConfig;
+use App\Services\MerchantActivityService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -73,13 +74,14 @@ class MerchantProvisioningService
                 ?? PlatformPlan::where('slug', 'starter')->where('is_active', true)->first()
                 ?? PlatformPlan::where('is_active', true)->orderBy('display_order')->first();
 
-            // 5. Create trial subscription (14-day trial)
+            // 5. Create trial subscription (uses plan trial_days, default 14)
+            $trialDays = $plan?->trial_days ?? 14;
             $subscription = MerchantSubscription::create([
                 'merchant_id'   => $merchant->id,
                 'plan_id'       => $plan?->id,
                 'status'        => 'trial',
                 'started_at'    => now(),
-                'trial_ends_at' => now()->addDays(14),
+                'trial_ends_at' => now()->addDays($trialDays),
                 'billing_cycle' => 'monthly',
             ]);
 
@@ -125,6 +127,14 @@ class MerchantProvisioningService
                 'approved_by' => $approvedBy,
                 'approved_at' => now(),
             ]);
+
+            MerchantActivityService::log(
+                $merchant->id,
+                'merchant_provisioned',
+                "Workspace provisioned from application #{$application->id}",
+                ['application_id' => $application->id, 'plan' => $plan?->name, 'trial_days' => $trialDays],
+                $approvedBy
+            );
 
             return [
                 'merchant'      => $merchant,

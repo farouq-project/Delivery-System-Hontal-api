@@ -13,9 +13,6 @@ class ApplicationController extends Controller
         private readonly MerchantProvisioningService $provisioningService
     ) {}
 
-    /**
-     * GET /api/v1/admin/applications
-     */
     public function index(Request $request)
     {
         $query = MerchantApplication::query()
@@ -31,22 +28,15 @@ class ApplicationController extends Controller
         return response()->json($query->paginate($request->per_page ?? 25));
     }
 
-    /**
-     * GET /api/v1/admin/applications/{application}
-     */
     public function show(MerchantApplication $application)
     {
         return response()->json(['data' => $application->load('approvedBy:id,name')]);
     }
 
-    /**
-     * PATCH /api/v1/admin/applications/{application}/approve
-     * Triggers MerchantProvisioningService — creates merchant, user, subscription, features.
-     */
     public function approve(Request $request, MerchantApplication $application)
     {
-        if (!$application->isPending()) {
-            return response()->json(['message' => 'Only pending applications can be approved.'], 422);
+        if (!$application->isActionable()) {
+            return response()->json(['message' => 'Only pending or review applications can be approved.'], 422);
         }
 
         try {
@@ -59,50 +49,59 @@ class ApplicationController extends Controller
         return response()->json([
             'message' => 'Application approved. Merchant workspace provisioned.',
             'data'    => [
-                'merchant_id'    => $result['merchant']->id,
-                'merchant_name'  => $result['merchant']->company_name,
-                'user_email'     => $result['user']->email,
-                'temp_password'  => $result['temp_password'],
-                'plan'           => $result['plan']?->name,
-                'trial_ends_at'  => $result['subscription']->trial_ends_at?->toDateString(),
+                'merchant_id'   => $result['merchant']->id,
+                'merchant_name' => $result['merchant']->company_name,
+                'user_email'    => $result['user']->email,
+                'temp_password' => $result['temp_password'],
+                'plan'          => $result['plan']?->name,
+                'trial_ends_at' => $result['subscription']->trial_ends_at?->toDateString(),
             ],
         ]);
     }
 
-    /**
-     * PATCH /api/v1/admin/applications/{application}/reject
-     */
     public function reject(Request $request, MerchantApplication $application)
     {
-        if (!$application->isPending()) {
-            return response()->json(['message' => 'Only pending applications can be rejected.'], 422);
+        if (!$application->isActionable()) {
+            return response()->json(['message' => 'Only pending or review applications can be rejected.'], 422);
         }
 
-        $data = $request->validate(['notes' => 'nullable|string|max:2000']);
+        $data = $request->validate([
+            'rejection_reason' => 'required|string|max:2000',
+        ]);
 
         $application->update([
-            'status'      => 'rejected',
-            'notes'       => $data['notes'] ?? $application->notes,
-            'approved_by' => $request->user()->id,
-            'approved_at' => now(),
+            'status'           => 'rejected',
+            'rejection_reason' => $data['rejection_reason'],
+            'approved_by'      => $request->user()->id,
+            'approved_at'      => now(),
         ]);
 
         return response()->json(['message' => 'Application rejected.', 'data' => $application]);
     }
 
-    /**
-     * PATCH /api/v1/admin/applications/{application}/notes
-     */
+    public function requestInfo(Request $request, MerchantApplication $application)
+    {
+        if (!$application->isPending()) {
+            return response()->json(['message' => 'Only pending applications can be set to review.'], 422);
+        }
+
+        $data = $request->validate(['notes' => 'nullable|string|max:2000']);
+
+        $application->update([
+            'status'         => 'review',
+            'internal_notes' => $data['notes'] ?? $application->internal_notes,
+        ]);
+
+        return response()->json(['message' => 'Application moved to review.', 'data' => $application]);
+    }
+
     public function notes(Request $request, MerchantApplication $application)
     {
         $data = $request->validate(['notes' => 'required|string|max:2000']);
-        $application->update(['notes' => $data['notes']]);
+        $application->update(['internal_notes' => $data['notes']]);
         return response()->json(['data' => $application]);
     }
 
-    /**
-     * DELETE /api/v1/admin/applications/{application}
-     */
     public function destroy(MerchantApplication $application)
     {
         $application->delete();

@@ -76,6 +76,16 @@ class Merchant extends Model
         return $this->hasMany(MerchantBranch::class);
     }
 
+    public function activityLog()
+    {
+        return $this->hasMany(MerchantActivityLog::class)->orderByDesc('created_at');
+    }
+
+    public function billing()
+    {
+        return $this->hasOne(MerchantBilling::class);
+    }
+
     public function getVipScore(string $level): int
     {
         static $defaults = ['standard' => 0, 'silver' => 50, 'gold' => 100, 'platinum' => 200];

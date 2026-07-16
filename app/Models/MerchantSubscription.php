@@ -10,12 +10,12 @@ class MerchantSubscription extends Model
 {
     use HasFactory, SoftDeletes;
 
-    // Valid status values
-    public const STATUSES = ['trial', 'active', 'suspended', 'expired', 'cancelled'];
+    public const STATUSES = ['trial', 'active', 'paused', 'suspended', 'expired', 'cancelled'];
 
     protected $fillable = [
         'merchant_id', 'plan_id', 'status',
         'started_at', 'expires_at', 'trial_ends_at',
+        'paused_at', 'resumed_at',
         'billing_cycle', 'next_invoice_date',
     ];
 
@@ -23,6 +23,8 @@ class MerchantSubscription extends Model
         'started_at'        => 'datetime',
         'expires_at'        => 'datetime',
         'trial_ends_at'     => 'datetime',
+        'paused_at'         => 'datetime',
+        'resumed_at'        => 'datetime',
         'next_invoice_date' => 'date',
     ];
 
@@ -49,6 +51,11 @@ class MerchantSubscription extends Model
     public function isSuspended(): bool
     {
         return $this->status === 'suspended';
+    }
+
+    public function isPaused(): bool
+    {
+        return $this->status === 'paused';
     }
 
     public function daysRemainingInTrial(): ?int

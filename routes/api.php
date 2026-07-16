@@ -195,32 +195,53 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('users', UserController::class);
     });
 
-    // ─── SUPER ADMIN PLATFORM ROUTES (Phase 5.2) ─────────────────────
+    // ─── SUPER ADMIN PLATFORM ROUTES (Phase 5.2 / 5.2A) ─────────────────
     Route::middleware(['auth:sanctum', 'role:super_admin'])->prefix('admin')->group(function () {
 
         // Applications
-        Route::get('applications',                          [ApplicationController::class, 'index']);
-        Route::get('applications/{application}',            [ApplicationController::class, 'show']);
-        Route::patch('applications/{application}/approve',  [ApplicationController::class, 'approve']);
-        Route::patch('applications/{application}/reject',   [ApplicationController::class, 'reject']);
-        Route::patch('applications/{application}/notes',    [ApplicationController::class, 'notes']);
-        Route::delete('applications/{application}',         [ApplicationController::class, 'destroy']);
+        Route::get('applications',                               [ApplicationController::class, 'index']);
+        Route::get('applications/{application}',                 [ApplicationController::class, 'show']);
+        Route::patch('applications/{application}/approve',       [ApplicationController::class, 'approve']);
+        Route::patch('applications/{application}/reject',        [ApplicationController::class, 'reject']);
+        Route::patch('applications/{application}/request-info',  [ApplicationController::class, 'requestInfo']);
+        Route::patch('applications/{application}/notes',         [ApplicationController::class, 'notes']);
+        Route::delete('applications/{application}',              [ApplicationController::class, 'destroy']);
 
         // Merchant directory & management
-        Route::get('merchants',                             [AdminMerchantController::class, 'index']);
-        Route::get('merchants/{merchant}',                  [AdminMerchantController::class, 'show']);
-        Route::patch('merchants/{merchant}/status',         [AdminMerchantController::class, 'updateStatus']);
-        Route::get('merchants/{merchant}/users',            [AdminMerchantController::class, 'users']);
-        Route::get('merchants/{merchant}/delivery-summary', [AdminMerchantController::class, 'deliverySummary']);
+        Route::get('merchants',                                        [AdminMerchantController::class, 'index']);
+        Route::get('merchants/{merchant}',                             [AdminMerchantController::class, 'show']);
+        Route::patch('merchants/{merchant}/status',                    [AdminMerchantController::class, 'updateStatus']);
+        Route::get('merchants/{merchant}/users',                       [AdminMerchantController::class, 'users']);
+        Route::get('merchants/{merchant}/delivery-summary',            [AdminMerchantController::class, 'deliverySummary']);
+        Route::get('merchants/{merchant}/features',                    [AdminMerchantController::class, 'features']);
+        Route::patch('merchants/{merchant}/features/{featureKey}',     [AdminMerchantController::class, 'updateFeature']);
+        Route::get('merchants/{merchant}/usage',                       [AdminMerchantController::class, 'usage']);
+        Route::get('merchants/{merchant}/activity',                    [AdminMerchantController::class, 'activity']);
+        Route::patch('merchants/{merchant}/users/{user}/reset-password', [AdminMerchantController::class, 'resetUserPassword']);
+        Route::patch('merchants/{merchant}/users/{user}/deactivate',   [AdminMerchantController::class, 'deactivateUser']);
+        Route::patch('merchants/{merchant}/users/{user}/reactivate',   [AdminMerchantController::class, 'reactivateUser']);
 
-        // Plans
-        Route::get('plans',                 [PlanController::class, 'index']);
-        Route::get('plans/{plan}',          [PlanController::class, 'show']);
-        Route::patch('plans/{plan}/toggle', [PlanController::class, 'toggle']);
+        // Plans (CRUD + lifecycle)
+        Route::get('plans',                  [PlanController::class, 'index']);
+        Route::post('plans',                 [PlanController::class, 'store']);
+        Route::get('plans/{plan}',           [PlanController::class, 'show']);
+        Route::patch('plans/{plan}',         [PlanController::class, 'update']);
+        Route::patch('plans/{plan}/toggle',  [PlanController::class, 'toggle']);
+        Route::post('plans/{plan}/duplicate',[PlanController::class, 'duplicate']);
+        Route::patch('plans/{plan}/archive', [PlanController::class, 'archive']);
+        Route::patch('plans/{id}/restore',   [PlanController::class, 'restore']);
+        Route::delete('plans/{plan}',        [PlanController::class, 'destroy']);
 
-        // Subscriptions
-        Route::get('subscriptions',               [SubscriptionController::class, 'index']);
-        Route::get('subscriptions/{subscription}',[SubscriptionController::class, 'show']);
+        // Subscriptions (view + lifecycle actions)
+        Route::get('subscriptions',                                    [SubscriptionController::class, 'index']);
+        Route::get('subscriptions/{subscription}',                     [SubscriptionController::class, 'show']);
+        Route::patch('subscriptions/{subscription}/change-plan',       [SubscriptionController::class, 'changePlan']);
+        Route::patch('subscriptions/{subscription}/pause',             [SubscriptionController::class, 'pause']);
+        Route::patch('subscriptions/{subscription}/resume',            [SubscriptionController::class, 'resume']);
+        Route::patch('subscriptions/{subscription}/extend-trial',      [SubscriptionController::class, 'extendTrial']);
+        Route::patch('subscriptions/{subscription}/activate',          [SubscriptionController::class, 'activate']);
+        Route::patch('subscriptions/{subscription}/expire',            [SubscriptionController::class, 'expire']);
+        Route::patch('subscriptions/{subscription}/cancel',            [SubscriptionController::class, 'cancel']);
     });
 
     // ─── DRIVER APP ROUTES ────────────────────────────────────────────
