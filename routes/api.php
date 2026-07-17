@@ -35,10 +35,10 @@ Route::prefix('public')->group(function () {
 Route::prefix('v1')->group(function () {
 
     // ─── PUBLIC TRACKING (no auth) ────────────────────────────────────
-    Route::get('track/{token}', [TrackingController::class, 'show']);
+    Route::middleware('throttle:60,1')->get('track/{token}', [TrackingController::class, 'show']);
 
     // ─── UNAUTHENTICATED UTILITIES ───────────────────────────────────
-    Route::get('utils/parse-maps-link', function (\Illuminate\Http\Request $request) {
+    Route::middleware('throttle:30,1')->get('utils/parse-maps-link', function (\Illuminate\Http\Request $request) {
         $url = $request->query('url', '');
         if (!$url) {
             return response()->json(['error' => 'url query parameter is required'], 422);

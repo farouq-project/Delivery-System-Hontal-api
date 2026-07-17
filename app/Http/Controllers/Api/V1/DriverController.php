@@ -89,8 +89,9 @@ class DriverController extends Controller
         $data = $request->validate([
             'driver_name'         => 'sometimes|string|max:255',
             'phone'               => 'sometimes|string|max:20',
-            'vehicle_type'        => 'sometimes|in:motorcycle,car,pickup_truck,van,truck',
+            'vehicle_type'        => 'sometimes|string|max:50',
             'vehicle_plate'       => 'sometimes|string|max:20',
+            'vehicle_nickname'    => 'nullable|string|max:80',
             'vehicle_capacity_kg' => 'nullable|numeric',
             'notes'               => 'nullable|string',
             'is_active'           => 'nullable|boolean',
