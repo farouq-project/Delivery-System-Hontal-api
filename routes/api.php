@@ -17,6 +17,8 @@ use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Controllers\Api\V1\Admin\ApplicationController;
 use App\Http\Controllers\Api\V1\Admin\MerchantController as AdminMerchantController;
 use App\Http\Controllers\Api\V1\Admin\PlanController;
+use App\Http\Controllers\Api\V1\Admin\PlatformDashboardController;
+use App\Http\Controllers\Api\V1\Admin\PlatformSettingsController;
 use App\Http\Controllers\Api\V1\Admin\SubscriptionController;
 use App\Http\Controllers\Api\Public\PublicController;
 use App\Http\Controllers\Api\V1\TrackingController;
@@ -200,8 +202,19 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('users', UserController::class);
     });
 
-    // ─── SUPER ADMIN PLATFORM ROUTES (Phase 5.2 / 5.2A) ─────────────────
+    // ─── SUPER ADMIN PLATFORM ROUTES (Phase 5.2 / 5.2A / 5.3) ──────────────
     Route::middleware(['auth:sanctum', 'role:super_admin'])->prefix('admin')->group(function () {
+
+        // Phase 5.3 — Platform Dashboard
+        Route::get('dashboard',                [PlatformDashboardController::class, 'dashboard']);
+        Route::get('health',                   [PlatformDashboardController::class, 'health']);
+        Route::get('activity',                 [PlatformDashboardController::class, 'activity']);
+        Route::get('search',                   [PlatformDashboardController::class, 'search']);
+        Route::get('analytics/google-api',     [PlatformDashboardController::class, 'googleApiAnalytics']);
+
+        // Phase 5.3 — Platform Settings
+        Route::get('platform/settings',        [PlatformSettingsController::class, 'index']);
+        Route::patch('platform/settings',      [PlatformSettingsController::class, 'update']);
 
         // Applications
         Route::get('applications',                               [ApplicationController::class, 'index']);
@@ -222,6 +235,9 @@ Route::prefix('v1')->group(function () {
         Route::patch('merchants/{merchant}/features/{featureKey}',     [AdminMerchantController::class, 'updateFeature']);
         Route::get('merchants/{merchant}/usage',                       [AdminMerchantController::class, 'usage']);
         Route::get('merchants/{merchant}/activity',                    [AdminMerchantController::class, 'activity']);
+        // Phase 5.3 — Support Console
+        Route::get('merchants/{merchant}/support',                     [AdminMerchantController::class, 'supportConsole']);
+        Route::patch('merchants/{merchant}/support-notes',             [AdminMerchantController::class, 'updateSupportNotes']);
         Route::patch('merchants/{merchant}/users/{user}/reset-password', [AdminMerchantController::class, 'resetUserPassword']);
         Route::patch('merchants/{merchant}/users/{user}/deactivate',   [AdminMerchantController::class, 'deactivateUser']);
         Route::patch('merchants/{merchant}/users/{user}/reactivate',   [AdminMerchantController::class, 'reactivateUser']);

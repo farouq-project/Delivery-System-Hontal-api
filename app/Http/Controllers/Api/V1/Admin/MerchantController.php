@@ -5,12 +5,14 @@ namespace App\Http\Controllers\Api\V1\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\DeliveryOrder;
 use App\Models\Driver;
+use App\Models\GoogleApiUsageLog;
 use App\Models\Merchant;
 use App\Models\MerchantSubscription;
 use App\Models\PlatformPlan;
 use App\Models\User;
 use App\Services\MerchantActivityService;
 use App\Services\MerchantProvisioningService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -366,5 +368,68 @@ class MerchantController extends Controller
         }
 
         return response()->json(['data' => ['deleted' => true, 'method' => $method]]);
+    }
+
+    // ─── Part 7: Support Console ──────────────────────────────────────────────
+
+    public function supportConsole(Merchant $merchant): JsonResponse
+    {
+        $now = now();
+
+        $recentActivity = $merchant->activityLog()
+            ->with('actor:id,name')
+            ->limit(10)
+            ->get()
+            ->map(fn($e) => [
+                'id'         => $e->id,
+                'event_type' => $e->event_type,
+                'description'=> $e->description,
+                'actor_name' => $e->actor?->name,
+                'created_at' => $e->created_at,
+            ]);
+
+        $apiUsage = DB::table('google_api_usage_logs')
+            ->where('merchant_id', $merchant->id)
+            ->whereMonth('created_at', $now->month)
+            ->whereYear('created_at', $now->year)
+            ->selectRaw('COUNT(*) as requests, SUM(estimated_units) as units, SUM(CASE WHEN cache_hit = 1 THEN 1 ELSE 0 END) as cache_hits')
+            ->first();
+
+        $cacheHitRate = ($apiUsage->requests ?? 0) > 0
+            ? round(($apiUsage->cache_hits / $apiUsage->requests) * 100, 1)
+            : 0;
+
+        return response()->json([
+            'data' => [
+                'support_notes'   => $merchant->support_notes,
+                'internal_notes'  => $merchant->internal_notes,
+                'recent_activity' => $recentActivity,
+                'api_usage_summary' => [
+                    'requests_this_month'        => (int) ($apiUsage->requests ?? 0),
+                    'estimated_units_this_month'  => (int) ($apiUsage->units ?? 0),
+                    'cache_hit_rate'             => $cacheHitRate,
+                ],
+            ],
+        ]);
+    }
+
+    public function updateSupportNotes(Request $request, Merchant $merchant): JsonResponse
+    {
+        $data = $request->validate([
+            'support_notes'  => 'nullable|string|max:5000',
+            'internal_notes' => 'nullable|string|max:5000',
+        ]);
+
+        $merchant->update($data);
+
+        MerchantActivityService::log(
+            $merchant->id,
+            'support_notes_updated',
+            'Support console notes updated',
+            [],
+            $request->user()->id
+        );
+
+        return response()->json(['message' => 'Notes saved.']);
     }
 }

@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\CustomerProfile;
 use App\Models\DeliveryOrder;
 use App\Models\MerchantSetting;
 use App\Models\Scopes\MerchantScope;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 
 class TrackingController extends Controller
 {
@@ -44,16 +46,73 @@ class TrackingController extends Controller
             $driverName = $order->driver->driver_name;
         }
 
+        // ── Part 6: Predicted delivery time ──────────────────────────────────
+        [$predictedAt, $predictionSource] = $this->computePrediction($order);
+
+        $timezone = $order->merchant?->timezone ?? 'Asia/Jakarta';
+
         return response()->json([
             'data' => [
-                'order_number'      => $order->order_number,
-                'customer_name'     => $order->customer_name,
-                'status'            => $status,
-                'merchant_name'     => $order->merchant?->company_name,
-                'estimated_arrival' => $order->requested_delivery_date?->format('Y-m-d'),
-                'driver_name'       => $driverName,
-                'notes'             => $order->delivery_notes,
+                'order_number'           => $order->order_number,
+                'customer_name'          => $order->customer_name,
+                'status'                 => $status,
+                'merchant_name'          => $order->merchant?->company_name,
+                'estimated_arrival'      => $order->requested_delivery_date?->format('Y-m-d'),
+                'driver_name'            => $driverName,
+                'notes'                  => $order->delivery_notes,
+                'predicted_delivery_time'=> $predictedAt
+                    ? $predictedAt->setTimezone($timezone)->toIso8601String()
+                    : null,
+                'prediction_source'      => $predictionSource,
             ],
         ]);
+    }
+
+    private function computePrediction(DeliveryOrder $order): array
+    {
+        // Already delivered/failed — no prediction needed
+        if (in_array($order->status, ['delivered', 'failed', 'cancelled'])) {
+            return [null, null];
+        }
+
+        $createdAt = $order->order_created_at ?? $order->created_at;
+        if (! $createdAt) {
+            return [null, null];
+        }
+
+        // Try customer-level average first
+        if ($order->customer_id) {
+            $profile = CustomerProfile::where('customer_id', $order->customer_id)
+                ->where('merchant_id', $order->merchant_id)
+                ->first();
+
+            if ($profile && $profile->avg_delivery_time_hours) {
+                return [
+                    (clone $createdAt)->addMinutes((int) round($profile->avg_delivery_time_hours * 60)),
+                    'customer_history',
+                ];
+            }
+        }
+
+        // Fallback: merchant-wide average from last 90 days of delivered orders
+        $merchantAvgHours = DB::table('delivery_orders')
+            ->where('merchant_id', $order->merchant_id)
+            ->where('status', 'delivered')
+            ->whereNotNull('delivered_at')
+            ->whereNotNull('order_created_at')
+            ->whereRaw('delivered_at > order_created_at')
+            ->where('created_at', '>=', now()->subDays(90))
+            ->whereNull('deleted_at')
+            ->selectRaw('AVG(TIMESTAMPDIFF(MINUTE, order_created_at, delivered_at) / 60.0) as avg_hours')
+            ->value('avg_hours');
+
+        if ($merchantAvgHours) {
+            return [
+                (clone $createdAt)->addMinutes((int) round($merchantAvgHours * 60)),
+                'merchant_average',
+            ];
+        }
+
+        return [null, null];
     }
 }

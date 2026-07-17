@@ -2,10 +2,12 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class MerchantSetting extends Model
 {
+    use HasFactory;
     protected $fillable = [
         'merchant_id', 'depot_address', 'depot_latitude', 'depot_longitude',
         'routing_algorithm', 'auto_geocode_enabled', 'max_stops_per_driver', 'klotter_size',

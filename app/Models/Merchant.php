@@ -14,6 +14,8 @@ class Merchant extends Model
         'ulid', 'company_name', 'slug', 'address', 'phone', 'email', 'timezone', 'logo_path',
         // Phase 3 — Merchant Platform
         'tax_number', 'invoice_footer', 'brand_color',
+        // Phase 5.3 — Support Console
+        'support_notes', 'internal_notes',
     ];
 
     public function users()
