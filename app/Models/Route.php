@@ -19,16 +19,25 @@ class Route extends Model
         'ulid', 'merchant_id', 'route_date', 'label', 'status',
         'total_stops', 'total_drivers', 'total_distance_m', 'estimated_duration_min',
         'generation_method', 'generated_by', 'generated_at', 'locked_at', 'locked_by', 'notes',
+        // V2 analytics
+        'routing_mode', 'distance_before_optimization_m', 'optimization_saving_m',
+        'google_calls', 'cache_hits', 'quality_score', 'batch_count',
     ];
 
     protected $casts = [
-        'route_date' => 'date',
-        'generated_at' => 'datetime',
-        'locked_at' => 'datetime',
-        'total_stops' => 'integer',
-        'total_drivers' => 'integer',
-        'total_distance_m' => 'integer',
-        'estimated_duration_min' => 'integer',
+        'route_date'                     => 'date',
+        'generated_at'                   => 'datetime',
+        'locked_at'                      => 'datetime',
+        'total_stops'                    => 'integer',
+        'total_drivers'                  => 'integer',
+        'total_distance_m'               => 'integer',
+        'estimated_duration_min'         => 'integer',
+        'distance_before_optimization_m' => 'integer',
+        'optimization_saving_m'          => 'integer',
+        'google_calls'                   => 'integer',
+        'cache_hits'                     => 'integer',
+        'quality_score'                  => 'float',
+        'batch_count'                    => 'integer',
     ];
 
     public function merchant()

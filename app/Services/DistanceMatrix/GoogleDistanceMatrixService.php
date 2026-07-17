@@ -2,6 +2,7 @@
 
 namespace App\Services\DistanceMatrix;
 
+use App\Models\GoogleApiUsageLog;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -9,17 +10,22 @@ use Illuminate\Support\Facades\Log;
 class GoogleDistanceMatrixService
 {
     private string $apiKey;
-    private int $cacheTtl = 600; // 10 minutes
-    private int $maxElements = 25; // per request
+    private int    $cacheTtl     = 600; // seconds; overridden by merchant setting
+    private int    $maxElements  = 25;  // per API request (Google limit: 25 origins × 25 dests)
 
     public function __construct()
     {
         $this->apiKey = config('services.google.maps_api_key', '');
     }
 
+    public function setCacheTtl(int $ttl): void
+    {
+        $this->cacheTtl = $ttl;
+    }
+
     /**
-     * Get distance matrix between multiple origins and destinations.
-     * Returns array[origin_index][dest_index] = ['distance_m' => int, 'duration_min' => int]
+     * Get an NxM distance/duration matrix.
+     * Returns array[origin_idx][dest_idx] = ['distance_m' => int, 'duration_min' => int]
      */
     public function getMatrix(array $origins, array $destinations): array
     {
@@ -27,7 +33,7 @@ class GoogleDistanceMatrixService
             return $this->mockMatrix($origins, $destinations);
         }
 
-        $matrix = [];
+        $matrix       = [];
         $originChunks = array_chunk($origins, $this->maxElements, true);
         $destChunks   = array_chunk($destinations, $this->maxElements, true);
 
@@ -36,9 +42,17 @@ class GoogleDistanceMatrixService
             $destOffset = 0;
             foreach ($destChunks as $destChunk) {
                 $cacheKey = $this->buildCacheKey($origChunk, $destChunk);
+                $wasCached = Cache::has($cacheKey);
+
                 $chunk = Cache::remember($cacheKey, $this->cacheTtl, function () use ($origChunk, $destChunk) {
                     return $this->fetchChunk(array_values($origChunk), array_values($destChunk));
                 });
+
+                $this->logUsage(
+                    count($origChunk) * count($destChunk),
+                    $wasCached,
+                    $cacheKey
+                );
 
                 foreach ($chunk as $oi => $row) {
                     foreach ($row as $di => $value) {
@@ -53,9 +67,6 @@ class GoogleDistanceMatrixService
         return $matrix;
     }
 
-    /**
-     * Get distance from one point to many destinations.
-     */
     public function getDistances(array $origin, array $destinations): array
     {
         $matrix = $this->getMatrix([$origin], $destinations);
@@ -76,7 +87,7 @@ class GoogleDistanceMatrixService
             $data = $response->json();
 
             if (($data['status'] ?? '') !== 'OK') {
-                Log::warning('Distance Matrix failed', ['status' => $data['status'] ?? 'unknown']);
+                Log::warning('[DM] Distance Matrix failed', ['status' => $data['status'] ?? 'unknown']);
                 return $this->mockMatrix($origins, $destinations);
             }
 
@@ -96,8 +107,25 @@ class GoogleDistanceMatrixService
 
             return $matrix;
         } catch (\Exception $e) {
-            Log::error('Distance Matrix exception', ['error' => $e->getMessage()]);
+            Log::error('[DM] Distance Matrix exception', ['error' => $e->getMessage()]);
             return $this->mockMatrix($origins, $destinations);
+        }
+    }
+
+    private function logUsage(int $elementCount, bool $cacheHit, string $cacheKey): void
+    {
+        try {
+            GoogleApiUsageLog::create([
+                'merchant_id'      => null,
+                'api_type'         => 'distance_matrix',
+                'request_count'    => 1,
+                'estimated_units'  => $elementCount,
+                'cache_hit'        => $cacheHit,
+                'cache_key'        => $cacheKey,
+                'response_time_ms' => 0,
+            ]);
+        } catch (\Throwable) {
+            // Non-fatal — logging must never break routing
         }
     }
 
@@ -118,19 +146,15 @@ class GoogleDistanceMatrixService
 
     private function haversineDistance(array $from, array $to): array
     {
-        $R = 6371000;
-        $lat1 = deg2rad($from['lat']);
-        $lat2 = deg2rad($to['lat']);
+        $R    = 6371000;
         $dLat = deg2rad($to['lat'] - $from['lat']);
         $dLng = deg2rad($to['lng'] - $from['lng']);
-
-        $a = sin($dLat / 2) ** 2 + cos($lat1) * cos($lat2) * sin($dLng / 2) ** 2;
-        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
-        $distM = (int) ($R * $c);
+        $a    = sin($dLat / 2) ** 2 + cos(deg2rad($from['lat'])) * cos(deg2rad($to['lat'])) * sin($dLng / 2) ** 2;
+        $distM = (int) (6371000 * 2 * atan2(sqrt($a), sqrt(1 - $a)));
 
         return [
             'distance_m'   => $distM,
-            'duration_min' => (int) ceil($distM / 1000 / 25 * 60), // 25 km/h urban
+            'duration_min' => (int) ceil($distM / 1000 / 25 * 60),
         ];
     }
 

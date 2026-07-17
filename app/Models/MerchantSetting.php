@@ -18,6 +18,8 @@ class MerchantSetting extends Model
         'tracking_expiry_hours', 'public_tracking_enabled', 'show_estimated_arrival', 'driver_location_visible',
         'whatsapp_notifications_enabled', 'email_notifications_enabled', 'push_notifications_enabled',
         'invoice_prefix', 'invoice_date_format',
+        // Phase 6 — Routing Engine V2
+        'routing_mode', 'distance_matrix_cache_ttl', 'batch_enforcement', 'two_opt_enabled',
     ];
 
     protected $casts = [
@@ -43,6 +45,10 @@ class MerchantSetting extends Model
         'whatsapp_notifications_enabled'   => 'boolean',
         'email_notifications_enabled'      => 'boolean',
         'push_notifications_enabled'       => 'boolean',
+        // Phase 6
+        'distance_matrix_cache_ttl'        => 'integer',
+        'batch_enforcement'                => 'boolean',
+        'two_opt_enabled'                  => 'boolean',
     ];
 
     public function merchant()
