@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\V1\Admin\MerchantController as AdminMerchantControl
 use App\Http\Controllers\Api\V1\Admin\PlanController;
 use App\Http\Controllers\Api\V1\Admin\SubscriptionController;
 use App\Http\Controllers\Api\Public\PublicController;
+use App\Http\Controllers\Api\V1\TrackingController;
 use Illuminate\Support\Facades\Route;
 
 // ─── PUBLIC ROUTES (no auth) ──────────────────────────────────────────────────
@@ -28,6 +29,9 @@ Route::prefix('public')->group(function () {
 });
 
 Route::prefix('v1')->group(function () {
+
+    // ─── PUBLIC TRACKING (no auth) ────────────────────────────────────
+    Route::get('track/{token}', [TrackingController::class, 'show']);
 
     // ─── AUTH ─────────────────────────────────────────────────────────
     Route::prefix('auth')->group(function () {

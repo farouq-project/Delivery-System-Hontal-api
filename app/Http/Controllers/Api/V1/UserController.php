@@ -101,6 +101,10 @@ class UserController extends Controller
     {
         $this->authorizeManage($request, $user);
 
+        if ($request->user()->role === 'merchant_owner') {
+            return response()->json(['message' => 'Merchant owners cannot permanently delete users.'], 403);
+        }
+
         if ($user->id === $request->user()->id) {
             return response()->json(['message' => 'You cannot delete your own account.'], 422);
         }
