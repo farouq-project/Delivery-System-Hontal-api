@@ -2,6 +2,7 @@
 
 namespace App\Services\Geocoding;
 
+use App\Models\GoogleApiUsageLog;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -16,15 +17,18 @@ class GoogleGeocodingService
         $this->apiKey = config('services.google.maps_api_key', '');
     }
 
-    public function geocode(string $address): ?array
+    public function geocode(string $address, ?int $merchantId = null): ?array
     {
         if (empty($this->apiKey) || $this->apiKey === 'YOUR_GOOGLE_MAPS_API_KEY_HERE') {
             return $this->mockGeocode($address);
         }
 
         $cacheKey = 'geo:' . md5(strtolower(trim($address)));
+        $cacheHit = Cache::has($cacheKey);
 
-        return Cache::remember($cacheKey, $this->cacheTtl, function () use ($address) {
+        $startTime = microtime(true);
+
+        $result = Cache::remember($cacheKey, $this->cacheTtl, function () use ($address) {
             try {
                 $response = Http::timeout(10)->get('https://maps.googleapis.com/maps/api/geocode/json', [
                     'address'    => $address,
@@ -41,18 +45,28 @@ class GoogleGeocodingService
                     return null;
                 }
 
-                $result = $data['results'][0];
+                $r = $data['results'][0];
                 return [
-                    'formatted_address' => $result['formatted_address'],
-                    'latitude'          => $result['geometry']['location']['lat'],
-                    'longitude'         => $result['geometry']['location']['lng'],
-                    'place_id'          => $result['place_id'],
+                    'formatted_address' => $r['formatted_address'],
+                    'latitude'          => $r['geometry']['location']['lat'],
+                    'longitude'         => $r['geometry']['location']['lng'],
+                    'place_id'          => $r['place_id'],
                 ];
             } catch (\Exception $e) {
                 Log::error('Geocoding exception', ['address' => $address, 'error' => $e->getMessage()]);
                 return null;
             }
         });
+
+        // Log all requests — cache hits are free (estimated_units = 0) but still tracked
+        // so future analytics can show hit ratio and total request volume accurately.
+        $responseTimeMs = $cacheHit ? null : (int) round((microtime(true) - $startTime) * 1000);
+
+        if ($result && $merchantId) {
+            $this->logUsage($merchantId, 'geocoding', 1, $cacheHit, $cacheKey, $responseTimeMs);
+        }
+
+        return $result;
     }
 
     public function reverseGeocode(float $lat, float $lng): ?string
@@ -81,6 +95,29 @@ class GoogleGeocodingService
                 return null;
             }
         });
+    }
+
+    private function logUsage(
+        int $merchantId,
+        string $apiType,
+        int $units = 1,
+        bool $cacheHit = false,
+        ?string $cacheKey = null,
+        ?int $responseTimeMs = null
+    ): void {
+        try {
+            GoogleApiUsageLog::create([
+                'merchant_id'      => $merchantId,
+                'api_type'         => $apiType,
+                'request_count'    => 1,
+                'estimated_units'  => $cacheHit ? 0 : $units,
+                'cache_hit'        => $cacheHit,
+                'cache_key'        => $cacheKey,
+                'response_time_ms' => $responseTimeMs,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('GoogleGeocodingService: failed to log API usage', ['error' => $e->getMessage()]);
+        }
     }
 
     private function mockGeocode(string $address): array

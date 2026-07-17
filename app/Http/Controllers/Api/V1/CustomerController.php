@@ -7,7 +7,10 @@ use App\Http\Traits\ResolvesCurrentMerchant;
 use App\Models\Customer;
 use App\Models\DeliveryOrder;
 use App\Models\MerchantCluster;
+use App\Models\MerchantSetting;
 use App\Services\Geocoding\GoogleGeocodingService;
+use App\Services\GoogleMapsLinkService;
+use App\Services\LocationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -20,20 +23,37 @@ class CustomerController extends Controller
 {
     use ResolvesCurrentMerchant;
 
-    public function __construct(private GoogleGeocodingService $geocoder) {}
+    public function __construct(
+        private GoogleGeocodingService $geocoder,
+        private GoogleMapsLinkService  $mapsLink,
+    ) {}
 
-    private function detectCluster(int $merchantId, string $name): string
+    // ─── Resolve Google Maps link (unauthenticated from user's perspective but still auth-gated) ─
+
+    public function resolveMapsLink(Request $request)
     {
-        $clusters = MerchantCluster::namesForMerchant($merchantId);
+        $data = $request->validate([
+            'url' => 'required|string|max:2000',
+        ]);
 
-        foreach ($clusters as $cluster) {
-            if (stripos($name, $cluster) !== false) {
-                return $cluster;
-            }
+        if (!$this->mapsLink->isGoogleMapsUrl($data['url'])) {
+            return response()->json([
+                'message' => 'That does not appear to be a Google Maps URL. Paste a link from maps.google.com or maps.app.goo.gl.',
+            ], 422);
         }
 
-        return 'no cluster';
+        $coords = $this->mapsLink->extractCoordinates($data['url']);
+
+        if (!$coords) {
+            return response()->json([
+                'message' => 'Could not extract coordinates from that link. Make sure the link points to a specific location, not a search result.',
+            ], 422);
+        }
+
+        return response()->json(['data' => $coords]);
     }
+
+    // ─── Index ─────────────────────────────────────────────────────────────────
 
     public function index(Request $request)
     {
@@ -104,6 +124,8 @@ class CustomerController extends Controller
         return response()->json($query->paginate($request->per_page ?? 25));
     }
 
+    // ─── Store ─────────────────────────────────────────────────────────────────
+
     public function store(Request $request)
     {
         $data = $request->validate([
@@ -113,6 +135,8 @@ class CustomerController extends Controller
             'default_address'    => 'nullable|string',
             'default_latitude'   => 'nullable|numeric|between:-90,90',
             'default_longitude'  => 'nullable|numeric|between:-180,180',
+            'location_source'    => 'nullable|in:google_maps_link,manual_pin,address_geocoding,unknown',
+            'google_maps_link'   => 'nullable|string|max:2000',
             'vip_level'          => 'nullable|in:standard,silver,gold,platinum',
             'cluster'            => 'nullable|string|max:50',
             'notes'              => 'nullable|string',
@@ -124,13 +148,7 @@ class CustomerController extends Controller
             $data['cluster'] = $this->detectCluster($merchantId, $data['customer_name']);
         }
 
-        if (empty($data['default_latitude']) && !empty($data['default_address'])) {
-            $geo = $this->geocoder->geocode($data['default_address']);
-            if ($geo) {
-                $data['default_latitude']  = $geo['latitude'];
-                $data['default_longitude'] = $geo['longitude'];
-            }
-        }
+        [$data] = $this->resolveLocationSource($data, null, $merchantId);
 
         $customer = Customer::create([
             ...$data,
@@ -139,14 +157,32 @@ class CustomerController extends Controller
             'vip_level'   => $data['vip_level'] ?? 'standard',
         ]);
 
-        return response()->json(['data' => $customer], 201);
+        $settings = MerchantSetting::where('merchant_id', $merchantId)->first();
+        $fresh    = $customer->fresh();
+
+        return response()->json([
+            'data'           => $fresh,
+            'depot_distance' => $this->depotDistance($fresh, $settings),
+            'warnings'       => $this->buildWarnings($fresh, $settings),
+        ], 201);
     }
+
+    // ─── Show ──────────────────────────────────────────────────────────────────
 
     public function show(Request $request, Customer $customer)
     {
         $this->authorizeMerchant($request, $customer->merchant_id);
-        return response()->json(['data' => $customer->load(['orders' => fn($q) => $q->latest()->limit(10)])]);
+
+        $settings = MerchantSetting::where('merchant_id', $customer->merchant_id)->first();
+
+        return response()->json([
+            'data'           => $customer->load(['orders' => fn($q) => $q->latest()->limit(10)]),
+            'depot_distance' => $this->depotDistance($customer, $settings),
+            'location_confidence' => $customer->locationConfidence(),
+        ]);
     }
+
+    // ─── Update ────────────────────────────────────────────────────────────────
 
     public function update(Request $request, Customer $customer)
     {
@@ -159,6 +195,8 @@ class CustomerController extends Controller
             'default_address'   => 'sometimes|nullable|string',
             'default_latitude'  => 'nullable|numeric|between:-90,90',
             'default_longitude' => 'nullable|numeric|between:-180,180',
+            'location_source'   => 'nullable|in:google_maps_link,manual_pin,address_geocoding,unknown',
+            'google_maps_link'  => 'nullable|string|max:2000',
             'vip_level'         => 'nullable|in:standard,silver,gold,platinum',
             'cluster'           => 'nullable|string|max:50',
             'notes'             => 'nullable|string',
@@ -170,17 +208,50 @@ class CustomerController extends Controller
             $data['cluster'] = $this->detectCluster($customer->merchant_id, $name);
         }
 
-        if (isset($data['default_address']) && empty($data['default_latitude'])) {
-            $geo = $this->geocoder->geocode($data['default_address']);
-            if ($geo) {
-                $data['default_latitude']  = $geo['latitude'];
-                $data['default_longitude'] = $geo['longitude'];
+        // Fetch settings early — needed for location change threshold
+        $settings        = MerchantSetting::where('merchant_id', $customer->merchant_id)->first();
+        $changeThreshold = (float) ($settings?->location_change_warning_radius ?? 2.0);
+
+        // Capture previous coordinates before resolving new ones
+        $prevLat = $customer->default_latitude;
+        $prevLng = $customer->default_longitude;
+
+        [$data] = $this->resolveLocationSource($data, $customer, $customer->merchant_id);
+
+        // Detect significant coordinate change using the merchant-configured threshold
+        $locationChangeWarning = null;
+        if (
+            $prevLat && $prevLng
+            && isset($data['default_latitude'], $data['default_longitude'])
+            && ($data['default_latitude'] != $prevLat || $data['default_longitude'] != $prevLng)
+        ) {
+            $distance = LocationService::distance(
+                $prevLat, $prevLng,
+                $data['default_latitude'], $data['default_longitude']
+            );
+            if ($distance >= $changeThreshold) {
+                $locationChangeWarning = [
+                    'distance_km'     => round($distance, 1),
+                    'previous_coords' => ['lat' => $prevLat, 'lng' => $prevLng],
+                    'new_coords'      => ['lat' => $data['default_latitude'], 'lng' => $data['default_longitude']],
+                    'threshold_km'    => $changeThreshold,
+                ];
             }
         }
 
         $customer->update($data);
-        return response()->json(['data' => $customer->fresh()]);
+        $fresh = $customer->fresh();
+
+        return response()->json([
+            'data'                    => $fresh,
+            'depot_distance'          => $this->depotDistance($fresh, $settings),
+            'location_confidence'     => $fresh->locationConfidence(),
+            'location_change_warning' => $locationChangeWarning,
+            'warnings'                => $this->buildWarnings($fresh, $settings),
+        ]);
     }
+
+    // ─── Bulk / utility ────────────────────────────────────────────────────────
 
     public function bulkUpdateCluster(Request $request)
     {
@@ -238,6 +309,11 @@ class CustomerController extends Controller
                 $update['default_longitude'] = $oldest->default_longitude;
                 if ($oldest->default_address) {
                     $update['default_address'] = $oldest->default_address;
+                }
+                // Preserve the source from the older record
+                if ($oldest->location_source !== 'unknown') {
+                    $update['location_source'] = $oldest->location_source;
+                    $update['location_last_verified_at'] = $oldest->location_last_verified_at;
                 }
             }
 
@@ -347,28 +423,34 @@ class CustomerController extends Controller
             $address   = $get('default_address');
             $latitude  = null;
             $longitude = null;
+            $locationSource = 'unknown';
+            $locationVerifiedAt = null;
 
             if ($address !== '') {
-                $geo = $this->geocoder->geocode($address);
+                $geo = $this->geocoder->geocode($address, $merchantId);
                 if ($geo) {
                     $latitude  = $geo['latitude'];
                     $longitude = $geo['longitude'];
+                    $locationSource = 'address_geocoding';
+                    $locationVerifiedAt = now();
                 }
             }
 
             try {
                 Customer::create([
-                    'ulid'              => Str::ulid(),
-                    'merchant_id'       => $merchantId,
-                    'customer_name'     => $customerName,
-                    'phone'             => $get('phone') ?: null,
-                    'email'             => $get('email') ?: null,
-                    'default_address'   => $address ?: null,
-                    'default_latitude'  => $latitude,
-                    'default_longitude' => $longitude,
-                    'vip_level'         => $vipLevel,
-                    'cluster'           => $get('cluster') ?: $this->detectCluster($merchantId, $customerName),
-                    'notes'             => $get('notes') ?: null,
+                    'ulid'                       => Str::ulid(),
+                    'merchant_id'                => $merchantId,
+                    'customer_name'              => $customerName,
+                    'phone'                      => $get('phone') ?: null,
+                    'email'                      => $get('email') ?: null,
+                    'default_address'            => $address ?: null,
+                    'default_latitude'           => $latitude,
+                    'default_longitude'          => $longitude,
+                    'location_source'            => $locationSource,
+                    'location_last_verified_at'  => $locationVerifiedAt,
+                    'vip_level'                  => $vipLevel,
+                    'cluster'                    => $get('cluster') ?: $this->detectCluster($merchantId, $customerName),
+                    'notes'                      => $get('notes') ?: null,
                 ]);
                 $imported++;
             } catch (\Throwable $e) {
@@ -428,11 +510,140 @@ class CustomerController extends Controller
                 $q->where('customer_name', 'like', "%{$request->q}%")
                   ->orWhere('phone', 'like', "%{$request->q}%");
             })
-            ->select(['id', 'ulid', 'customer_name', 'phone', 'default_address', 'default_latitude', 'default_longitude', 'vip_level'])
+            ->select(['id', 'ulid', 'customer_name', 'phone', 'default_address',
+                      'default_latitude', 'default_longitude', 'vip_level', 'location_source'])
             ->orderBy('customer_name')
             ->limit($request->limit ?? 10)
             ->get();
 
         return response()->json(['data' => $results]);
+    }
+
+    // ─── Private helpers ───────────────────────────────────────────────────────
+
+    private function detectCluster(int $merchantId, string $name): string
+    {
+        $clusters = MerchantCluster::namesForMerchant($merchantId);
+
+        foreach ($clusters as $cluster) {
+            if (stripos($name, $cluster) !== false) {
+                return $cluster;
+            }
+        }
+
+        return 'no cluster';
+    }
+
+    /**
+     * Resolves location source and sets coordinates + metadata on $data.
+     * Priority: google_maps_link > explicit lat/lng (manual_pin) > address geocoding.
+     *
+     * location_last_verified_at is updated ONLY when coordinates actually change.
+     * Edits to name, phone, notes, etc. must not touch the verification timestamp.
+     */
+    private function resolveLocationSource(array $data, ?Customer $existing, int $merchantId): array
+    {
+        // 1. Google Maps link extraction
+        if (!empty($data['google_maps_link'])) {
+            $coords = $this->mapsLink->extractCoordinates($data['google_maps_link']);
+            if ($coords) {
+                $data['default_latitude']  = $coords['latitude'];
+                $data['default_longitude'] = $coords['longitude'];
+                $data['location_source']   = 'google_maps_link';
+                if ($this->coordinatesChanged($data, $existing)) {
+                    $data['location_last_verified_at'] = now();
+                }
+            }
+            unset($data['google_maps_link']);
+            return [$data];
+        }
+
+        // 2. Explicit coordinates sent by client
+        if (!empty($data['default_latitude'])) {
+            $data['location_source'] = $data['location_source'] ?? 'manual_pin';
+            if ($this->coordinatesChanged($data, $existing)) {
+                $data['location_last_verified_at'] = now();
+            }
+            return [$data];
+        }
+
+        // 3. Auto-geocode from address (only when no explicit coordinates provided)
+        $address = $data['default_address'] ?? ($existing ? $existing->default_address : null);
+        if (!empty($address) && empty($data['default_latitude'])) {
+            $geo = $this->geocoder->geocode($address, $merchantId);
+            if ($geo) {
+                $data['default_latitude']  = $geo['latitude'];
+                $data['default_longitude'] = $geo['longitude'];
+                $data['location_source']   = 'address_geocoding';
+                if ($this->coordinatesChanged($data, $existing)) {
+                    $data['location_last_verified_at'] = now();
+                }
+            }
+        }
+
+        return [$data];
+    }
+
+    /**
+     * Returns true when the incoming coordinates differ from the existing record.
+     * For new records ($existing === null) any non-empty coordinates count as changed.
+     * Uses 7-decimal-place precision (~1 cm) to avoid float comparison noise.
+     */
+    private function coordinatesChanged(array $data, ?Customer $existing): bool
+    {
+        if ($existing === null) {
+            return !empty($data['default_latitude']);
+        }
+        return round((float) ($data['default_latitude']  ?? 0), 7) !== round((float) $existing->default_latitude,  7)
+            || round((float) ($data['default_longitude'] ?? 0), 7) !== round((float) $existing->default_longitude, 7);
+    }
+
+    /**
+     * Builds the structured warnings array for store/update responses.
+     * Returns an empty array when there are no warnings (never null).
+     */
+    private function buildWarnings(Customer $customer, ?MerchantSetting $settings): array
+    {
+        $warnings = [];
+        $info = $this->depotDistance($customer, $settings);
+
+        if ($info && $info['exceeds_radius']) {
+            $warnings[] = [
+                'type'        => 'depot_distance',
+                'distance_km' => $info['distance_km'],
+                'radius_km'   => $info['radius_km'],
+                'message'     => 'Customer location exceeds your configured service radius.',
+            ];
+        }
+
+        return $warnings;
+    }
+
+    /**
+     * Returns depot distance info, or null if depot/customer has no coordinates.
+     */
+    private function depotDistance(Customer $customer, ?MerchantSetting $settings): ?array
+    {
+        if (
+            !$customer->default_latitude
+            || !$customer->default_longitude
+            || !$settings?->depot_latitude
+            || !$settings?->depot_longitude
+        ) {
+            return null;
+        }
+
+        $distance = LocationService::distance(
+            $customer->default_latitude, $customer->default_longitude,
+            $settings->depot_latitude, $settings->depot_longitude
+        );
+
+        $radius = $settings->location_validation_radius ?? 30;
+
+        return [
+            'distance_km'  => round($distance, 2),
+            'radius_km'    => $radius,
+            'exceeds_radius' => $distance > $radius,
+        ];
     }
 }

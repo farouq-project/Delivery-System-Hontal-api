@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\DeliveryOrder;
+use App\Models\Driver;
 use App\Models\Merchant;
 use App\Models\MerchantSubscription;
 use App\Models\PlatformPlan;
@@ -320,5 +322,49 @@ class MerchantController extends Controller
         );
 
         return response()->json(['message' => 'User reactivated.']);
+    }
+
+    public function deleteUser(Request $request, Merchant $merchant, User $user)
+    {
+        abort_unless($user->merchant_id === $merchant->id, 403, 'User does not belong to this merchant.');
+
+        if ($user->role === 'merchant_owner') {
+            return response()->json(['message' => 'Cannot delete the merchant owner account.'], 422);
+        }
+
+        if ($user->id === $request->user()->id) {
+            return response()->json(['message' => 'Cannot delete your own account.'], 422);
+        }
+
+        // Determine whether historical records exist (drivers with completed deliveries)
+        $hasHistory = false;
+        if ($user->role === 'driver') {
+            $driver = Driver::where('user_id', $user->id)->first();
+            if ($driver) {
+                $hasHistory = DeliveryOrder::withoutGlobalScopes()
+                    ->where('driver_id', $driver->id)
+                    ->whereIn('status', ['in_transit', 'delivered', 'failed'])
+                    ->exists();
+            }
+        }
+
+        $method = $hasHistory ? 'soft_delete' : 'hard_delete';
+
+        MerchantActivityService::log(
+            $merchant->id,
+            'user_deleted',
+            "User {$user->name} ({$user->role}) permanently removed",
+            ['user_id' => $user->id, 'role' => $user->role, 'email' => $user->email, 'method' => $method],
+            $request->user()->id
+        );
+
+        if ($hasHistory) {
+            // Soft delete preserves audit trail referential integrity
+            $user->delete();
+        } else {
+            $user->forceDelete();
+        }
+
+        return response()->json(['data' => ['deleted' => true, 'method' => $method]]);
     }
 }

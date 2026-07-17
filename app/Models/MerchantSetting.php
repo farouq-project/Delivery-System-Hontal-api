@@ -9,7 +9,7 @@ class MerchantSetting extends Model
     protected $fillable = [
         'merchant_id', 'depot_address', 'depot_latitude', 'depot_longitude',
         'routing_algorithm', 'auto_geocode_enabled', 'max_stops_per_driver', 'klotter_size',
-        'order_edit_pin', 'hide_driver_logout',
+        'order_edit_pin', 'hide_driver_logout', 'location_validation_radius', 'location_change_warning_radius',
         'working_hours_start', 'working_hours_end', 'gps_ping_interval_sec', 'gps_history_days',
         // Phase 3 — Merchant Platform
         'working_days', 'holiday_mode_enabled', 'max_delivery_radius_km', 'auto_dispatch',
@@ -25,6 +25,8 @@ class MerchantSetting extends Model
         'depot_longitude'                  => 'float',
         'max_stops_per_driver'             => 'integer',
         'klotter_size'                     => 'integer',
+        'location_validation_radius'        => 'integer',
+        'location_change_warning_radius'    => 'integer',
         'gps_ping_interval_sec'            => 'integer',
         'gps_history_days'                 => 'integer',
         // Phase 3

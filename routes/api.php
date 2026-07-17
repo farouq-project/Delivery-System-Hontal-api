@@ -56,12 +56,13 @@ Route::prefix('v1')->group(function () {
         Route::post('geocode/address', [OrderController::class, 'geocode']);
 
         // Customers
-        Route::get('customers/search',           [CustomerController::class, 'search']);
-        Route::get('customers/template',         [CustomerController::class, 'downloadTemplate']);
+        Route::get('customers/search',                [CustomerController::class, 'search']);
+        Route::get('customers/template',              [CustomerController::class, 'downloadTemplate']);
         Route::post('customers/bulk-delete',          [CustomerController::class, 'bulkDelete']);
         Route::post('customers/bulk-update-cluster',  [CustomerController::class, 'bulkUpdateCluster']);
         Route::post('customers/deduplicate',          [CustomerController::class, 'deduplicate']);
-        Route::post('customers/import',          [CustomerController::class, 'import']);
+        Route::post('customers/import',               [CustomerController::class, 'import']);
+        Route::post('customers/resolve-maps-link',    [CustomerController::class, 'resolveMapsLink']);
         Route::apiResource('customers', CustomerController::class);
 
         // Drivers
@@ -220,6 +221,7 @@ Route::prefix('v1')->group(function () {
         Route::patch('merchants/{merchant}/users/{user}/reset-password', [AdminMerchantController::class, 'resetUserPassword']);
         Route::patch('merchants/{merchant}/users/{user}/deactivate',   [AdminMerchantController::class, 'deactivateUser']);
         Route::patch('merchants/{merchant}/users/{user}/reactivate',   [AdminMerchantController::class, 'reactivateUser']);
+        Route::delete('merchants/{merchant}/users/{user}',             [AdminMerchantController::class, 'deleteUser']);
 
         // Plans (CRUD + lifecycle)
         Route::get('plans',                  [PlanController::class, 'index']);

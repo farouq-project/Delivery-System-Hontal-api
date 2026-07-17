@@ -19,19 +19,34 @@ class Customer extends Model
         static::addGlobalScope(new MerchantScope());
     }
 
+    // Valid location_source values
+    const LOCATION_SOURCES = ['google_maps_link', 'manual_pin', 'address_geocoding', 'unknown'];
+
     protected $fillable = [
         'ulid', 'merchant_id', 'customer_name', 'phone', 'email',
         'default_address', 'default_latitude', 'default_longitude',
+        'location_source', 'location_last_verified_at',
         'vip_level', 'cluster', 'notes', 'total_orders', 'last_order_at', 'is_active',
     ];
 
     protected $casts = [
-        'default_latitude' => 'float',
-        'default_longitude' => 'float',
-        'total_orders' => 'integer',
-        'last_order_at' => 'datetime',
-        'is_active' => 'boolean',
+        'default_latitude'           => 'float',
+        'default_longitude'          => 'float',
+        'total_orders'               => 'integer',
+        'last_order_at'              => 'datetime',
+        'location_last_verified_at'  => 'datetime',
+        'is_active'                  => 'boolean',
     ];
+
+    public function locationConfidence(): string
+    {
+        return match ($this->location_source) {
+            'google_maps_link'  => 'high',
+            'manual_pin'        => 'medium',
+            'address_geocoding' => 'medium',
+            default             => 'low',
+        };
+    }
 
     public function merchant()
     {
