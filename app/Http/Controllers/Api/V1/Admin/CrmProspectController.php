@@ -111,4 +111,94 @@ class CrmProspectController extends Controller
             ],
         ]);
     }
+
+    public function import(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:csv,txt|max:2048',
+        ]);
+
+        $file    = $request->file('file');
+        $handle  = fopen($file->getRealPath(), 'r');
+        $headers = null;
+        $created = 0;
+        $skipped = 0;
+        $errors  = [];
+
+        $headerMap = [
+            'business name'   => 'business_name',
+            'business_name'   => 'business_name',
+            'address'         => 'address',
+            'phone'           => 'phone',
+            'website'         => 'website',
+            'notes'           => 'notes',
+            'status'          => 'pipeline_stage',
+            'pipeline_stage'  => 'pipeline_stage',
+            'category'        => 'category',
+            'city'            => 'city',
+            'contact person'  => 'contact_person',
+            'contact_person'  => 'contact_person',
+        ];
+
+        while (($row = fgetcsv($handle)) !== false) {
+            if ($headers === null) {
+                $headers = array_map(fn($h) => strtolower(trim($h)), $row);
+                continue;
+            }
+
+            if (count($row) !== count($headers)) {
+                $skipped++;
+                continue;
+            }
+
+            $record = array_combine($headers, $row);
+            $mapped = [];
+
+            foreach ($record as $col => $val) {
+                $field = $headerMap[$col] ?? null;
+                if ($field && trim($val) !== '') {
+                    $mapped[$field] = trim($val);
+                }
+            }
+
+            if (empty($mapped['business_name'])) {
+                $skipped++;
+                continue;
+            }
+
+            // Normalize pipeline_stage
+            if (isset($mapped['pipeline_stage'])) {
+                $stage = strtolower($mapped['pipeline_stage']);
+                $mapped['pipeline_stage'] = in_array($stage, self::STAGES) ? $stage : 'new';
+            } else {
+                $mapped['pipeline_stage'] = 'new';
+            }
+
+            // Normalize category
+            if (isset($mapped['category'])) {
+                $cat = strtolower($mapped['category']);
+                $mapped['category'] = in_array($cat, self::CATEGORIES) ? $cat : null;
+            }
+
+            $mapped['created_by'] = $request->user()?->id;
+
+            try {
+                CrmProspect::create($mapped);
+                $created++;
+            } catch (\Exception $e) {
+                $skipped++;
+                $errors[] = "Row skipped: {$mapped['business_name']} — {$e->getMessage()}";
+            }
+        }
+
+        fclose($handle);
+
+        return response()->json([
+            'data' => [
+                'created' => $created,
+                'skipped' => $skipped,
+                'errors'  => array_slice($errors, 0, 10),
+            ],
+        ]);
+    }
 }

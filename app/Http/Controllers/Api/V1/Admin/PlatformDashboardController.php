@@ -30,7 +30,9 @@ class PlatformDashboardController extends Controller
             ->selectRaw('COUNT(*) as total')
             ->selectRaw("SUM(CASE WHEN latest_sub.status = 'active' THEN 1 ELSE 0 END) as active_count")
             ->selectRaw("SUM(CASE WHEN latest_sub.status = 'trial' THEN 1 ELSE 0 END) as trial_count")
-            ->selectRaw("SUM(CASE WHEN latest_sub.status IN ('expired','cancelled','suspended') THEN 1 ELSE 0 END) as inactive_count")
+            ->selectRaw("SUM(CASE WHEN latest_sub.status = 'suspended' THEN 1 ELSE 0 END) as suspended_count")
+            ->selectRaw("SUM(CASE WHEN latest_sub.status = 'expired' THEN 1 ELSE 0 END) as expired_count")
+            ->selectRaw("SUM(CASE WHEN latest_sub.status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_count")
             ->whereNull('merchants.deleted_at')
             ->first();
 
@@ -81,35 +83,31 @@ class PlatformDashboardController extends Controller
             $platformHealth = 'warning';
         }
 
+        $totalRequests = (int) ($googleApiStats->requests ?? 0);
+        $cacheHits     = (int) ($googleApiStats->cache_hits ?? 0);
+        $cacheHitRate  = $totalRequests > 0 ? round(($cacheHits / $totalRequests) * 100, 1) : 0;
+
         return response()->json([
             'data' => [
                 'merchants' => [
-                    'total'    => (int) ($merchantCounts->total ?? 0),
-                    'active'   => (int) ($merchantCounts->active_count ?? 0),
-                    'trial'    => (int) ($merchantCounts->trial_count ?? 0),
-                    'paid'     => $paidMerchants,
-                    'inactive' => (int) ($merchantCounts->inactive_count ?? 0),
+                    'total'     => (int) ($merchantCounts->total ?? 0),
+                    'active'    => (int) ($merchantCounts->active_count ?? 0),
+                    'trial'     => (int) ($merchantCounts->trial_count ?? 0),
+                    'paid'      => $paidMerchants,
+                    'suspended' => (int) ($merchantCounts->suspended_count ?? 0),
+                    'expired'   => (int) ($merchantCounts->expired_count ?? 0),
+                    'cancelled' => (int) ($merchantCounts->cancelled_count ?? 0),
                 ],
-                'users' => [
-                    'active' => $activeUsers,
-                ],
-                'orders' => [
-                    'today'       => $ordersToday,
-                    'this_month'  => $monthlyOrders,
-                ],
-                'deliveries' => [
-                    'today' => $deliveriesToday,
-                ],
+                'active_users'      => $activeUsers,
+                'orders_today'      => $ordersToday,
+                'deliveries_today'  => $deliveriesToday,
+                'orders_this_month' => $monthlyOrders,
                 'google_api' => [
-                    'requests_this_month'      => (int) ($googleApiStats->requests ?? 0),
+                    'requests_this_month'        => $totalRequests,
                     'estimated_units_this_month' => (int) ($googleApiStats->units ?? 0),
-                    'cache_hits_this_month'    => (int) ($googleApiStats->cache_hits ?? 0),
-                    'warning_threshold'        => $warningThreshold,
+                    'cache_hit_rate'             => $cacheHitRate,
                 ],
-                'platform_health' => [
-                    'status'           => $platformHealth,
-                    'maintenance_mode' => $maintenanceMode,
-                ],
+                'platform_health' => $platformHealth,
             ],
         ]);
     }

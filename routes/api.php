@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\V1\RouteController;
 use App\Http\Controllers\Api\V1\SettingsController;
 use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Controllers\Api\V1\Admin\ApplicationController;
+use App\Http\Controllers\Api\V1\Admin\CrmMessageTemplateController;
 use App\Http\Controllers\Api\V1\Admin\CrmProspectController;
 use App\Http\Controllers\Api\V1\Admin\MerchantController as AdminMerchantController;
 use App\Http\Controllers\Api\V1\Admin\PlanController;
@@ -294,8 +295,16 @@ Route::prefix('v1')->group(function () {
         Route::delete('trial-merchants/{merchant}',  [TrialMerchantController::class, 'destroy']);
 
         // CRM Prospects (RC1)
-        Route::get('crm/stats',        [CrmProspectController::class, 'stats']);
+        Route::get('crm/stats',              [CrmProspectController::class, 'stats']);
+        Route::post('crm/import',            [CrmProspectController::class, 'import']);
         Route::apiResource('crm', CrmProspectController::class)->parameters(['crm' => 'crmProspect']);
+
+        // CRM Message Templates (RC1 Hotfix)
+        Route::get('crm-templates',                              [CrmMessageTemplateController::class, 'index']);
+        Route::post('crm-templates',                             [CrmMessageTemplateController::class, 'store']);
+        Route::patch('crm-templates/{crmMessageTemplate}',      [CrmMessageTemplateController::class, 'update']);
+        Route::delete('crm-templates/{crmMessageTemplate}',     [CrmMessageTemplateController::class, 'destroy']);
+        Route::post('crm-templates/{crmMessageTemplate}/preview',[CrmMessageTemplateController::class, 'preview']);
     });
 
     // ─── DRIVER APP ROUTES ────────────────────────────────────────────

@@ -50,7 +50,7 @@ class TrialMerchantController extends Controller
                 'merchant_id'             => $merchant->id,
                 'depot_latitude'          => -6.9175,
                 'depot_longitude'         => 107.6191,
-                'routing_algorithm'       => 'balanced',
+                'routing_algorithm'       => 'scored',
                 'routing_mode'            => 'balanced',
                 'max_stops_per_driver'    => 20,
                 'klotter_size'            => 10,
@@ -115,7 +115,7 @@ class TrialMerchantController extends Controller
                 'user_id'      => $driverUser->id,
                 'driver_name'  => 'Pengemudi Contoh',
                 'phone'        => '08111222333',
-                'vehicle_type' => 'motor',
+                'vehicle_type' => 'motorcycle',
                 'vehicle_plate'=> 'D 0000 XYZ',
                 'status'       => 'available',
                 'is_active'    => true,
@@ -184,7 +184,7 @@ class TrialMerchantController extends Controller
                     $q->select('id')->from('users')->where('merchant_id', $merchant->id);
                 })->delete();
             DB::table('users')->where('merchant_id', $merchant->id)->delete();
-            $merchant->delete();
+            $merchant->forceDelete();
         });
 
         return response()->json(null, 204);
