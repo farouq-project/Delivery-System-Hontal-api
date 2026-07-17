@@ -15,11 +15,13 @@ use App\Http\Controllers\Api\V1\RouteController;
 use App\Http\Controllers\Api\V1\SettingsController;
 use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Controllers\Api\V1\Admin\ApplicationController;
+use App\Http\Controllers\Api\V1\Admin\CrmProspectController;
 use App\Http\Controllers\Api\V1\Admin\MerchantController as AdminMerchantController;
 use App\Http\Controllers\Api\V1\Admin\PlanController;
 use App\Http\Controllers\Api\V1\Admin\PlatformDashboardController;
 use App\Http\Controllers\Api\V1\Admin\PlatformSettingsController;
 use App\Http\Controllers\Api\V1\Admin\SubscriptionController;
+use App\Http\Controllers\Api\V1\Admin\TrialMerchantController;
 use App\Http\Controllers\Api\Public\PublicController;
 use App\Http\Controllers\Api\V1\TrackingController;
 use Illuminate\Support\Facades\Route;
@@ -34,6 +36,28 @@ Route::prefix('v1')->group(function () {
 
     // ─── PUBLIC TRACKING (no auth) ────────────────────────────────────
     Route::get('track/{token}', [TrackingController::class, 'show']);
+
+    // ─── UNAUTHENTICATED UTILITIES ───────────────────────────────────
+    Route::get('utils/parse-maps-link', function (\Illuminate\Http\Request $request) {
+        $url = $request->query('url', '');
+        if (!$url) {
+            return response()->json(['error' => 'url query parameter is required'], 422);
+        }
+        // Extract lat/lng from common Google Maps URL patterns
+        $patterns = [
+            '/@(-?\d+\.\d+),(-?\d+\.\d+)/',             // @lat,lng
+            '/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/',        // ?q=lat,lng
+            '/[?&]query=(-?\d+\.\d+),(-?\d+\.\d+)/',    // ?query=lat,lng
+            '/[?&]ll=(-?\d+\.\d+),(-?\d+\.\d+)/',       // ?ll=lat,lng
+            '/^(-?\d+\.\d+),\s*(-?\d+\.\d+)$/',         // bare "lat, lng"
+        ];
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $url, $m)) {
+                return response()->json(['lat' => (float) $m[1], 'lng' => (float) $m[2]]);
+            }
+        }
+        return response()->json(['error' => 'Could not extract coordinates from this URL'], 422);
+    });
 
     // ─── AUTH ─────────────────────────────────────────────────────────
     Route::prefix('auth')->group(function () {
@@ -264,6 +288,14 @@ Route::prefix('v1')->group(function () {
         Route::patch('subscriptions/{subscription}/activate',          [SubscriptionController::class, 'activate']);
         Route::patch('subscriptions/{subscription}/expire',            [SubscriptionController::class, 'expire']);
         Route::patch('subscriptions/{subscription}/cancel',            [SubscriptionController::class, 'cancel']);
+
+        // Trial Merchant provisioning (RC1)
+        Route::post('trial-merchants',               [TrialMerchantController::class, 'create']);
+        Route::delete('trial-merchants/{merchant}',  [TrialMerchantController::class, 'destroy']);
+
+        // CRM Prospects (RC1)
+        Route::get('crm/stats',        [CrmProspectController::class, 'stats']);
+        Route::apiResource('crm', CrmProspectController::class)->parameters(['crm' => 'crmProspect']);
     });
 
     // ─── DRIVER APP ROUTES ────────────────────────────────────────────

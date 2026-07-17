@@ -18,7 +18,7 @@ class Driver extends Model
 
     protected $fillable = [
         'ulid', 'merchant_id', 'user_id', 'driver_name', 'phone',
-        'vehicle_type', 'vehicle_plate', 'vehicle_capacity_kg',
+        'vehicle_type', 'vehicle_plate', 'vehicle_nickname', 'vehicle_image_path', 'vehicle_capacity_kg',
         'status', 'current_lat', 'current_lng', 'last_seen', 'is_active', 'notes',
     ];
 
