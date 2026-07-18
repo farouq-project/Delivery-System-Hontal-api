@@ -79,7 +79,10 @@ class DatabaseSeeder extends Seeder
             'max_stops_per_driver' => 35,
             'working_hours_start'  => '07:00:00',
             'working_hours_end'    => '17:00:00',
-            'routing_algorithm'    => 'scored',
+            'routing_algorithm'    => 'balanced',
+            'routing_mode'         => 'balanced',
+            'batch_enforcement'    => true,
+            'two_opt_enabled'      => true,
         ]);
 
         foreach (['standard' => 0, 'silver' => 50, 'gold' => 100, 'platinum' => 200] as $level => $score) {

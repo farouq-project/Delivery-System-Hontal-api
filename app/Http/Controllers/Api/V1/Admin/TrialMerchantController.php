@@ -50,7 +50,7 @@ class TrialMerchantController extends Controller
                 'merchant_id'             => $merchant->id,
                 'depot_latitude'          => -6.9175,
                 'depot_longitude'         => 107.6191,
-                'routing_algorithm'       => 'scored',
+                'routing_algorithm'       => 'balanced',
                 'routing_mode'            => 'balanced',
                 'max_stops_per_driver'    => 20,
                 'klotter_size'            => 10,

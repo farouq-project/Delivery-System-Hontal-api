@@ -46,13 +46,16 @@ class MerchantProvisioningService
                 'timezone'     => 'Asia/Jakarta',
             ]);
 
-            // 2. Create default MerchantSetting
+            // 2. Create default MerchantSetting with V2 routing defaults
             MerchantSetting::create([
                 'merchant_id'          => $merchant->id,
                 'max_stops_per_driver' => 35,
                 'working_hours_start'  => '08:00:00',
                 'working_hours_end'    => '17:00:00',
-                'routing_algorithm'    => 'scored',
+                'routing_algorithm'    => 'balanced',
+                'routing_mode'         => 'balanced',
+                'batch_enforcement'    => true,
+                'two_opt_enabled'      => true,
             ]);
 
             // 3. Create Owner User with temporary password
