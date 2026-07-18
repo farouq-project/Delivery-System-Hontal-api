@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\V1\RouteController;
 use App\Http\Controllers\Api\V1\SettingsController;
 use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Controllers\Api\V1\Admin\ApplicationController;
+use App\Http\Controllers\Api\V1\Admin\AdminCustomerController;
 use App\Http\Controllers\Api\V1\Admin\CrmMessageTemplateController;
 use App\Http\Controllers\Api\V1\Admin\CrmProspectController;
 use App\Http\Controllers\Api\V1\Admin\MerchantController as AdminMerchantController;
@@ -294,17 +295,27 @@ Route::prefix('v1')->group(function () {
         Route::post('trial-merchants',               [TrialMerchantController::class, 'create']);
         Route::delete('trial-merchants/{merchant}',  [TrialMerchantController::class, 'destroy']);
 
-        // CRM Prospects (RC1)
-        Route::get('crm/stats',              [CrmProspectController::class, 'stats']);
-        Route::post('crm/import',            [CrmProspectController::class, 'import']);
+        // Customer Intelligence — cross-merchant search (super_admin only)
+        Route::get('customers/search', [AdminCustomerController::class, 'search']);
+
+        // CRM Prospects — literal routes must precede resource to avoid capture
+        Route::get('crm/stats',            [CrmProspectController::class, 'stats']);
+        Route::get('crm/template',         [CrmProspectController::class, 'templateDownload']);
+        Route::post('crm/import',          [CrmProspectController::class, 'import']);
+        Route::post('crm/import/preview',  [CrmProspectController::class, 'importPreview']);
         Route::apiResource('crm', CrmProspectController::class)->parameters(['crm' => 'crmProspect']);
 
+        // CRM Activities (per prospect)
+        Route::get('crm/{crmProspect}/activities',               [CrmProspectController::class, 'listActivities']);
+        Route::post('crm/{crmProspect}/activities',              [CrmProspectController::class, 'storeActivity']);
+        Route::delete('crm/{crmProspect}/activities/{activity}', [CrmProspectController::class, 'destroyActivity']);
+
         // CRM Message Templates (RC1 Hotfix)
-        Route::get('crm-templates',                              [CrmMessageTemplateController::class, 'index']);
-        Route::post('crm-templates',                             [CrmMessageTemplateController::class, 'store']);
-        Route::patch('crm-templates/{crmMessageTemplate}',      [CrmMessageTemplateController::class, 'update']);
-        Route::delete('crm-templates/{crmMessageTemplate}',     [CrmMessageTemplateController::class, 'destroy']);
-        Route::post('crm-templates/{crmMessageTemplate}/preview',[CrmMessageTemplateController::class, 'preview']);
+        Route::get('crm-templates',                               [CrmMessageTemplateController::class, 'index']);
+        Route::post('crm-templates',                              [CrmMessageTemplateController::class, 'store']);
+        Route::patch('crm-templates/{crmMessageTemplate}',       [CrmMessageTemplateController::class, 'update']);
+        Route::delete('crm-templates/{crmMessageTemplate}',      [CrmMessageTemplateController::class, 'destroy']);
+        Route::post('crm-templates/{crmMessageTemplate}/preview', [CrmMessageTemplateController::class, 'preview']);
     });
 
     // ─── DRIVER APP ROUTES ────────────────────────────────────────────

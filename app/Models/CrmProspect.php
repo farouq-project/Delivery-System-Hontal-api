@@ -12,6 +12,7 @@ class CrmProspect extends Model
         'city',
         'address',
         'phone',
+        'email',
         'website',
         'instagram',
         'contact_person',
@@ -24,7 +25,12 @@ class CrmProspect extends Model
     ];
 
     protected $casts = [
-        'last_contact_at'   => 'date',
-        'next_followup_at'  => 'date',
+        'last_contact_at'  => 'date',
+        'next_followup_at' => 'date',
     ];
+
+    public function activities()
+    {
+        return $this->hasMany(CrmActivity::class, 'prospect_id')->latest();
+    }
 }
