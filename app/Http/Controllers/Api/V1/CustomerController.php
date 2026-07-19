@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\DeliveryOrder;
 use App\Models\MerchantCluster;
 use App\Models\MerchantSetting;
+use App\Services\CustomerDomainRebuildService;
 use App\Services\Geocoding\GoogleGeocodingService;
 use App\Services\GoogleMapsLinkService;
 use App\Services\LocationService;
@@ -24,8 +25,9 @@ class CustomerController extends Controller
     use ResolvesCurrentMerchant;
 
     public function __construct(
-        private GoogleGeocodingService $geocoder,
-        private GoogleMapsLinkService  $mapsLink,
+        private GoogleGeocodingService       $geocoder,
+        private GoogleMapsLinkService        $mapsLink,
+        private CustomerDomainRebuildService $rebuilder,
     ) {}
 
     // ─── Resolve Google Maps link (unauthenticated from user's perspective but still auth-gated) ─
@@ -287,52 +289,120 @@ class CustomerController extends Controller
         $deleted = 0;
 
         foreach ($duplicateNames as $name) {
-            $dupes = Customer::where('merchant_id', $merchantId)
-                ->where('customer_name', $name)
-                ->orderBy('id')
-                ->get();
+            DB::transaction(function () use ($merchantId, $name, &$deleted) {
+                $dupes = Customer::where('merchant_id', $merchantId)
+                    ->where('customer_name', $name)
+                    ->orderBy('id')
+                    ->get();
 
-            $primary = $dupes->sortByDesc('total_orders')->sortBy(fn($c) => $c->id)->first();
-            $oldest  = $dupes->first();
+                // Primary = most orders; tie-break = oldest id (most likely the "real" record)
+                $primary      = $dupes->sortByDesc('total_orders')->first();
+                $duplicateIds = $dupes->pluck('id')->filter(fn($id) => $id !== $primary->id)->values();
+                $dupeRecords  = $dupes->filter(fn($c) => $c->id !== $primary->id);
 
-            $duplicateIds = $dupes->pluck('id')->filter(fn($id) => $id !== $primary->id)->values();
+                // 1. Reassign orders to primary
+                DeliveryOrder::whereIn('customer_id', $duplicateIds)
+                    ->update(['customer_id' => $primary->id]);
 
-            DeliveryOrder::whereIn('customer_id', $duplicateIds)
-                ->update(['customer_id' => $primary->id]);
+                // 2. Reassign timeline events to primary (preserve full history)
+                DB::table('customer_timelines')
+                    ->whereIn('customer_id', $duplicateIds)
+                    ->update(['customer_id' => $primary->id]);
 
-            $realCount = DeliveryOrder::where('customer_id', $primary->id)->count();
+                // 3. Merge tags — copy any tag the primary doesn't already have
+                $existingTagIds = DB::table('customer_tag_assignments')
+                    ->where('customer_id', $primary->id)
+                    ->pluck('tag_id')
+                    ->flip();
 
-            $update = ['total_orders' => $realCount];
+                DB::table('customer_tag_assignments')
+                    ->whereIn('customer_id', $duplicateIds)
+                    ->get()
+                    ->each(function ($row) use ($primary, $existingTagIds) {
+                        if (!$existingTagIds->has($row->tag_id)) {
+                            DB::table('customer_tag_assignments')->insert([
+                                'customer_id' => $primary->id,
+                                'tag_id'      => $row->tag_id,
+                                'assigned_by' => $row->assigned_by,
+                                'created_at'  => $row->created_at,
+                            ]);
+                        }
+                    });
 
-            if ($oldest->id !== $primary->id && $oldest->default_latitude !== null) {
-                $update['default_latitude']  = $oldest->default_latitude;
-                $update['default_longitude'] = $oldest->default_longitude;
-                if ($oldest->default_address) {
-                    $update['default_address'] = $oldest->default_address;
+                // 4. Merge scalar fields — take first non-null/non-empty value across all records
+                //    ordered: primary first, then duplicates oldest→newest
+                $allByPriority = $dupes->sortByDesc(fn($c) => $c->id === $primary->id ? PHP_INT_MAX : $c->total_orders);
+
+                $merged = [];
+
+                // phone / email / notes — take primary's value; fall back to first non-empty duplicate
+                foreach (['phone', 'email', 'notes'] as $field) {
+                    if (empty($primary->$field)) {
+                        $fallback = $dupeRecords->first(fn($c) => !empty($c->$field));
+                        if ($fallback) {
+                            $merged[$field] = $fallback->$field;
+                        }
+                    }
                 }
-                // Preserve the source from the older record
-                if ($oldest->location_source !== 'unknown') {
-                    $update['location_source'] = $oldest->location_source;
-                    $update['location_last_verified_at'] = $oldest->location_last_verified_at;
+
+                // vip_level — promote to highest tier found across all records
+                $vipRank = ['standard' => 0, 'silver' => 1, 'gold' => 2, 'platinum' => 3];
+                $highestVip = $allByPriority->reduce(function ($carry, $c) use ($vipRank) {
+                    $rank = $vipRank[$c->vip_level ?? 'standard'] ?? 0;
+                    return $rank > ($vipRank[$carry] ?? 0) ? ($c->vip_level ?? 'standard') : $carry;
+                }, $primary->vip_level ?? 'standard');
+                if ($highestVip !== ($primary->vip_level ?? 'standard')) {
+                    $merged['vip_level'] = $highestVip;
                 }
-            }
 
-            if ($oldest->id !== $primary->id && $oldest->cluster !== null) {
-                $update['cluster'] = $oldest->cluster;
-            }
+                // location — prefer highest-confidence GPS; fall back to oldest with coords
+                $locationConfidenceRank = [
+                    'google_maps_link' => 4,
+                    'geocoded'         => 3,
+                    'manual_pin'       => 2,
+                    'imported'         => 1,
+                    'unknown'          => 0,
+                ];
+                $bestLocation = $allByPriority->filter(fn($c) => $c->default_latitude !== null)
+                    ->sortByDesc(fn($c) => $locationConfidenceRank[$c->location_source ?? 'unknown'] ?? 0)
+                    ->first();
+                if ($bestLocation && $bestLocation->id !== $primary->id) {
+                    $merged['default_latitude']          = $bestLocation->default_latitude;
+                    $merged['default_longitude']         = $bestLocation->default_longitude;
+                    $merged['default_address']           = $bestLocation->default_address ?: $primary->default_address;
+                    $merged['location_source']           = $bestLocation->location_source;
+                    $merged['location_last_verified_at'] = $bestLocation->location_last_verified_at;
+                }
 
-            $primary->update($update);
+                // cluster — keep primary's; fall back to any duplicate that has one
+                if (empty($primary->cluster)) {
+                    $withCluster = $dupeRecords->first(fn($c) => !empty($c->cluster));
+                    if ($withCluster) {
+                        $merged['cluster'] = $withCluster->cluster;
+                    }
+                }
 
-            if ($oldest->id !== $primary->id) {
-                DB::table('customers')
-                    ->where('id', $primary->id)
-                    ->update(['created_at' => $oldest->created_at]);
-            }
+                // created_at — use the oldest across all records
+                $oldest = $dupes->sortBy('created_at')->first();
+                if ($oldest->created_at < $primary->created_at) {
+                    $merged['created_at'] = $oldest->created_at;
+                }
 
-            $deleted += Customer::where('merchant_id', $merchantId)
-                ->where('customer_name', $name)
-                ->where('id', '!=', $primary->id)
-                ->delete();
+                if (!empty($merged)) {
+                    DB::table('customers')->where('id', $primary->id)->update($merged);
+                }
+
+                // 5. Delete duplicate customer_profiles (cascade would remove them anyway,
+                //    but explicit delete keeps intent clear before customer delete)
+                DB::table('customer_profiles')->whereIn('customer_id', $duplicateIds)->delete();
+
+                // 6. Delete duplicate customers (cascades remaining FK children)
+                $deleted += Customer::whereIn('id', $duplicateIds)->delete();
+
+                // 7. Rebuild the primary's profile + health + segment from the now-merged orders
+                $primary->refresh();
+                $this->rebuilder->rebuild($primary);
+            });
         }
 
         return response()->json(['data' => ['deleted' => $deleted, 'groups' => $duplicateNames->count()]]);
