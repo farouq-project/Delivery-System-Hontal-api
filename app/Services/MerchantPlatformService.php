@@ -50,17 +50,22 @@ class MerchantPlatformService
         $s = MerchantSetting::firstOrCreate(['merchant_id' => $merchantId]);
 
         return [
-            'depot_address'          => $s->depot_address,
-            'depot_latitude'         => $s->depot_latitude,
-            'depot_longitude'        => $s->depot_longitude,
-            'routing_algorithm'      => $s->routing_algorithm ?? 'balanced',
-            'max_stops_per_driver'   => $s->max_stops_per_driver ?? 20,
-            'klotter_size'           => $s->klotter_size ?? 10,
-            'max_delivery_radius_km' => $s->max_delivery_radius_km,
-            'auto_dispatch'          => (bool) ($s->auto_dispatch ?? false),
-            'auto_geocode_enabled'   => (bool) ($s->auto_geocode_enabled ?? false),
-            'hide_driver_logout'     => (bool) ($s->hide_driver_logout ?? false),
-            'order_edit_pin'         => $s->order_edit_pin,
+            'depot_address'               => $s->depot_address,
+            'depot_latitude'              => $s->depot_latitude,
+            'depot_longitude'             => $s->depot_longitude,
+            'routing_algorithm'           => $s->routing_algorithm ?? 'balanced',
+            'routing_mode'                => $s->routing_mode ?? 'balanced',
+            'max_stops_per_driver'        => $s->max_stops_per_driver ?? 20,
+            'klotter_size'                => $s->klotter_size ?? 10,
+            'max_delivery_radius_km'      => $s->max_delivery_radius_km,
+            'location_validation_radius'  => $s->location_validation_radius ?? 30,
+            'auto_dispatch'               => (bool) ($s->auto_dispatch ?? false),
+            'auto_geocode_enabled'        => (bool) ($s->auto_geocode_enabled ?? false),
+            'hide_driver_logout'          => (bool) ($s->hide_driver_logout ?? false),
+            'order_edit_pin'              => $s->order_edit_pin,
+            'batch_enforcement'           => (bool) ($s->batch_enforcement ?? true),
+            'two_opt_enabled'             => (bool) ($s->two_opt_enabled ?? true),
+            'distance_matrix_cache_ttl'   => $s->distance_matrix_cache_ttl,
         ];
     }
 
@@ -70,9 +75,12 @@ class MerchantPlatformService
 
         $allowed = [
             'depot_address', 'depot_latitude', 'depot_longitude',
-            'routing_algorithm', 'max_stops_per_driver', 'klotter_size',
-            'max_delivery_radius_km', 'auto_dispatch', 'auto_geocode_enabled',
-            'hide_driver_logout', 'order_edit_pin', 'location_validation_radius',
+            'routing_algorithm', 'routing_mode',
+            'max_stops_per_driver', 'klotter_size',
+            'max_delivery_radius_km', 'location_validation_radius',
+            'auto_dispatch', 'auto_geocode_enabled',
+            'hide_driver_logout', 'order_edit_pin',
+            'batch_enforcement', 'two_opt_enabled', 'distance_matrix_cache_ttl',
         ];
         $s->update(array_intersect_key($data, array_flip($allowed)));
 
