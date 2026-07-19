@@ -19,6 +19,7 @@ use App\Services\Geocoding\GoogleGeocodingService;
 use App\Services\OrderService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
@@ -195,11 +196,26 @@ class OrderController extends Controller
             ? collect($data['items'])->pluck('name')->filter()->unique()
             : collect([$data['product_name'] ?? null])->filter();
 
+        $now = now();
         foreach ($names as $name) {
-            $catalog = ProductCatalog::firstOrNew(['merchant_id' => $merchantId, 'name' => $name]);
-            $catalog->usage_count = ($catalog->exists ? $catalog->usage_count : 0) + 1;
-            $catalog->last_used_at = now();
-            $catalog->save();
+            // insertOrIgnore + update is atomic: avoids UNIQUE constraint race
+            // on concurrent requests from a fresh merchant with empty product_catalog.
+            DB::table('product_catalog')->insertOrIgnore([
+                'merchant_id'  => $merchantId,
+                'name'         => $name,
+                'usage_count'  => 0,
+                'last_used_at' => $now,
+                'created_at'   => $now,
+                'updated_at'   => $now,
+            ]);
+            DB::table('product_catalog')
+                ->where('merchant_id', $merchantId)
+                ->where('name', $name)
+                ->update([
+                    'usage_count'  => DB::raw('usage_count + 1'),
+                    'last_used_at' => $now,
+                    'updated_at'   => $now,
+                ]);
         }
     }
 

@@ -72,10 +72,11 @@ class TrialMerchantController extends Controller
             }
 
             MerchantSubscription::create([
-                'merchant_id' => $merchant->id,
-                'status'      => 'trial',
-                'started_at'  => now(),
-                'expires_at'  => now()->addDays($trialDays),
+                'merchant_id'   => $merchant->id,
+                'status'        => 'trial',
+                'started_at'    => now(),
+                'trial_ends_at' => now()->addDays($trialDays),
+                'expires_at'    => now()->addDays($trialDays),
             ]);
 
             $owner = User::create([
