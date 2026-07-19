@@ -72,7 +72,7 @@ class MerchantPlatformService
             'depot_address', 'depot_latitude', 'depot_longitude',
             'routing_algorithm', 'max_stops_per_driver', 'klotter_size',
             'max_delivery_radius_km', 'auto_dispatch', 'auto_geocode_enabled',
-            'hide_driver_logout', 'order_edit_pin',
+            'hide_driver_logout', 'order_edit_pin', 'location_validation_radius',
         ];
         $s->update(array_intersect_key($data, array_flip($allowed)));
 
