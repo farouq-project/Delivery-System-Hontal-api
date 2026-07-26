@@ -87,6 +87,31 @@ class MerchantPlatformService
         return $this->getOperational($merchantId);
     }
 
+    // ─── Business Profile (Phase 6.2) ───────────────────────────────
+
+    public function getBusinessProfile(int $merchantId): array
+    {
+        $s = MerchantSetting::firstOrCreate(['merchant_id' => $merchantId]);
+
+        return [
+            'business_type'     => $s->business_type,
+            'business_unit'     => $s->business_unit     ?? 'order',
+            'business_category' => $s->business_category,
+            'operating_region'  => $s->operating_region,
+            'currency'          => $s->currency          ?? 'IDR',
+        ];
+    }
+
+    public function updateBusinessProfile(int $merchantId, array $data): array
+    {
+        $s = MerchantSetting::firstOrCreate(['merchant_id' => $merchantId]);
+
+        $allowed = ['business_type', 'business_unit', 'business_category', 'operating_region', 'currency'];
+        $s->update(array_intersect_key($data, array_flip($allowed)));
+
+        return $this->getBusinessProfile($merchantId);
+    }
+
     // ─── Business Hours ──────────────────────────────────────────────
 
     public function getHours(int $merchantId): array

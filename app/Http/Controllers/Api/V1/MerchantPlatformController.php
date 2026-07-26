@@ -97,6 +97,27 @@ class MerchantPlatformController extends Controller
         return response()->json(['data' => $this->service->updateOperational($merchantId, $data)]);
     }
 
+    // ─── Business Profile (Phase 6.2) ──────────────────────────────────
+
+    public function getBusinessProfile(Request $request): JsonResponse
+    {
+        return response()->json(['data' => $this->service->getBusinessProfile($this->gate($request))]);
+    }
+
+    public function updateBusinessProfile(Request $request): JsonResponse
+    {
+        $merchantId = $this->gate($request);
+        $data = $request->validate([
+            'business_type'     => 'sometimes|nullable|string|max:100',
+            'business_unit'     => 'sometimes|string|in:kg,tray,box,pcs,bottle,gallon,package,order,custom|max:50',
+            'business_category' => 'sometimes|nullable|string|max:100',
+            'operating_region'  => 'sometimes|nullable|string|max:100',
+            'currency'          => 'sometimes|string|size:3',
+        ]);
+
+        return response()->json(['data' => $this->service->updateBusinessProfile($merchantId, $data)]);
+    }
+
     // ─── Business Hours ────────────────────────────────────────────────
 
     public function getHours(Request $request): JsonResponse

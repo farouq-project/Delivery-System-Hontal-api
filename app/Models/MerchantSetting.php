@@ -20,6 +20,8 @@ class MerchantSetting extends Model
         'invoice_prefix', 'invoice_date_format',
         // Phase 6 — Routing Engine V2
         'routing_mode', 'distance_matrix_cache_ttl', 'batch_enforcement', 'two_opt_enabled',
+        // Phase 6.2 — Business Profile
+        'business_type', 'business_unit', 'business_category', 'operating_region', 'currency',
     ];
 
     protected $casts = [

@@ -151,9 +151,13 @@ Route::prefix('v1')->group(function () {
 
         // ─── Merchant Platform (Phase 3 — role-gated inside controller) ─
         Route::prefix('settings/platform')->group(function () {
-            // Business Profile
+            // Business Profile (company identity — from merchants table)
             Route::get('profile',  [MerchantPlatformController::class, 'getProfile']);
             Route::patch('profile', [MerchantPlatformController::class, 'updateProfile']);
+
+            // Business Identity (industry config — from merchant_settings, Phase 6.2)
+            Route::get('business',  [MerchantPlatformController::class, 'getBusinessProfile']);
+            Route::patch('business', [MerchantPlatformController::class, 'updateBusinessProfile']);
 
             // Operational
             Route::get('operational',  [MerchantPlatformController::class, 'getOperational']);
