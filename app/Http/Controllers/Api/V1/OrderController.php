@@ -14,6 +14,7 @@ use App\Models\ProductCatalog;
 use App\Models\Route;
 use App\Models\RouteAssignment;
 use App\Models\RouteStop;
+use App\Models\MerchantSubscription;
 use App\Models\Scopes\MerchantScope;
 use App\Services\Geocoding\GoogleGeocodingService;
 use App\Services\OrderService;
@@ -155,6 +156,15 @@ class OrderController extends Controller
         ]);
 
         $this->recordProductCatalog($merchantId, $data);
+
+        // Track delivery credit usage (skip unlimited/enterprise where delivery_limit is null)
+        $subscription = MerchantSubscription::where('merchant_id', $merchantId)
+            ->whereIn('status', ['active', 'trial'])
+            ->latest()
+            ->first();
+        if ($subscription && $subscription->plan?->delivery_limit !== null) {
+            $subscription->increment('credits_used');
+        }
 
         if (!empty($data['driver_id'])) {
             $this->assignDriver($order, $data['driver_id'], $request->user());

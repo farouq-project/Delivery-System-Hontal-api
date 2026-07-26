@@ -23,7 +23,9 @@ use App\Http\Controllers\Api\V1\Admin\PlanController;
 use App\Http\Controllers\Api\V1\Admin\PlatformDashboardController;
 use App\Http\Controllers\Api\V1\Admin\PlatformSettingsController;
 use App\Http\Controllers\Api\V1\Admin\SubscriptionController;
+use App\Http\Controllers\Api\V1\Admin\CreditPackController;
 use App\Http\Controllers\Api\V1\Admin\TrialMerchantController;
+use App\Http\Controllers\Api\V1\MerchantSubscriptionController;
 use App\Http\Controllers\Api\Public\PublicController;
 use App\Http\Controllers\Api\V1\TrackingController;
 use Illuminate\Support\Facades\Route;
@@ -32,6 +34,9 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('public')->group(function () {
     Route::post('register-interest', [PublicController::class, 'registerInterest']);
     Route::get('plans',              [PublicController::class, 'plans']);
+    Route::get('features',           [PublicController::class, 'features']);
+    Route::get('faq',                [PublicController::class, 'faq']);
+    Route::get('testimonials',       [PublicController::class, 'testimonials']);
 });
 
 Route::prefix('v1')->group(function () {
@@ -148,6 +153,9 @@ Route::prefix('v1')->group(function () {
 
         // Payment methods (read-only for all authenticated roles — used in order creation)
         Route::get('settings/payment-methods', [SettingsController::class, 'indexPaymentMethods']);
+
+        // Subscription (merchant-facing — own plan & credit status)
+        Route::get('subscription', [MerchantSubscriptionController::class, 'show']);
 
         // ─── Merchant Platform (Phase 3 — role-gated inside controller) ─
         Route::prefix('settings/platform')->group(function () {
@@ -294,6 +302,13 @@ Route::prefix('v1')->group(function () {
         Route::patch('subscriptions/{subscription}/activate',          [SubscriptionController::class, 'activate']);
         Route::patch('subscriptions/{subscription}/expire',            [SubscriptionController::class, 'expire']);
         Route::patch('subscriptions/{subscription}/cancel',            [SubscriptionController::class, 'cancel']);
+        Route::post('subscriptions/{subscription}/grant-credits',      [CreditPackController::class, 'grantCredits']);
+
+        // Credit pack options
+        Route::get('credit-packs', [CreditPackController::class, 'index']);
+
+        // Release checklist / system health
+        Route::get('release-checklist', [PlatformDashboardController::class, 'releaseChecklist']);
 
         // Trial Merchant provisioning (RC1)
         Route::post('trial-merchants',               [TrialMerchantController::class, 'create']);

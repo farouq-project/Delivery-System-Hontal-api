@@ -42,9 +42,14 @@ class RoutingEngineService
 
     public function generate(Merchant $merchant, string $routeDate): Route
     {
-        $settings = $merchant->settings
-            ?? new \App\Models\MerchantSetting(['depot_latitude' => -6.9175, 'depot_longitude' => 107.6191]);
-        $depot = ['lat' => $settings->depot_latitude ?? -6.9175, 'lng' => $settings->depot_longitude ?? 107.6191];
+        $settings = $merchant->settings;
+        if (!$settings || $settings->depot_latitude === null || $settings->depot_longitude === null) {
+            throw new \RuntimeException(
+                "Merchant #{$merchant->id} has no depot coordinates configured. " .
+                "Set depot latitude and longitude in Settings → Operational before generating routes."
+            );
+        }
+        $depot = ['lat' => $settings->depot_latitude, 'lng' => $settings->depot_longitude];
         $mode  = $settings->routing_mode ?? 'balanced';
 
         $pendingOrders = DeliveryOrder::with('customer')
@@ -277,9 +282,14 @@ class RoutingEngineService
     public function reoptimize(Route $route, array $newOrderIds): Route
     {
         $merchant = $route->merchant;
-        $settings = $merchant->settings
-            ?? new \App\Models\MerchantSetting(['depot_latitude' => -6.9175, 'depot_longitude' => 107.6191]);
-        $depot = ['lat' => $settings->depot_latitude ?? -6.9175, 'lng' => $settings->depot_longitude ?? 107.6191];
+        $settings = $merchant->settings;
+        if (!$settings || $settings->depot_latitude === null || $settings->depot_longitude === null) {
+            throw new \RuntimeException(
+                "Merchant #{$merchant->id} has no depot coordinates configured. " .
+                "Set depot latitude and longitude in Settings → Operational before generating routes."
+            );
+        }
+        $depot = ['lat' => $settings->depot_latitude, 'lng' => $settings->depot_longitude];
 
         $newOrders = DeliveryOrder::with('customer')
             ->whereIn('id', $newOrderIds)

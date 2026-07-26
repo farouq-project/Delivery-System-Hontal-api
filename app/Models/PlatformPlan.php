@@ -23,7 +23,8 @@ class PlatformPlan extends Model
 
     protected $fillable = [
         'name', 'slug', 'description', 'monthly_price',
-        'delivery_limit', 'branch_limit', 'driver_limit', 'customer_limit',
+        'delivery_limit', 'included_routing_mode',
+        'branch_limit', 'driver_limit', 'customer_limit',
         'trial_days', 'features', 'is_active', 'display_order',
     ];
 
@@ -38,6 +39,12 @@ class PlatformPlan extends Model
         'trial_days'     => 'integer',
         'display_order'  => 'integer',
     ];
+
+    /** Alias: delivery_limit is surfaced as "delivery_credits" in the UI. */
+    public function getDeliveryCreditsAttribute(): ?int
+    {
+        return $this->delivery_limit;
+    }
 
     public function subscriptions()
     {

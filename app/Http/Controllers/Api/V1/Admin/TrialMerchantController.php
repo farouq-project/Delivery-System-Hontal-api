@@ -32,7 +32,7 @@ class TrialMerchantController extends Controller
             'trial_days'    => 'nullable|integer|min:1|max:365',
         ]);
 
-        $trialDays = $data['trial_days'] ?? 30;
+        $trialDays = $data['trial_days'] ?? 7;
         $result    = [];
 
         DB::transaction(function () use ($data, $trialDays, &$result) {
@@ -48,8 +48,6 @@ class TrialMerchantController extends Controller
 
             MerchantSetting::create([
                 'merchant_id'             => $merchant->id,
-                'depot_latitude'          => -6.9175,
-                'depot_longitude'         => 107.6191,
                 'routing_algorithm'       => 'balanced',
                 'routing_mode'            => 'balanced',
                 'max_stops_per_driver'    => 20,

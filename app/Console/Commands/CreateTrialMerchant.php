@@ -45,7 +45,7 @@ class CreateTrialMerchant extends Command
                 'ulid'         => (string) Str::ulid(),
                 'company_name' => $company,
                 'slug'         => Str::slug($company) . '-' . rand(1000, 9999),
-                'address'      => 'Jl. Demo No. 1, Bandung',
+                'address'      => 'Belum diisi',
                 'phone'        => '08123456789',
                 'email'        => $email,
                 'timezone'     => 'Asia/Jakarta',
@@ -54,9 +54,6 @@ class CreateTrialMerchant extends Command
             // 2. Merchant Settings
             MerchantSetting::create([
                 'merchant_id'          => $merchant->id,
-                'depot_address'        => 'Jl. Demo No. 1, Bandung',
-                'depot_latitude'       => -6.9175,
-                'depot_longitude'      => 107.6191,
                 'routing_algorithm'    => 'balanced',
                 'routing_mode'         => 'balanced',
                 'max_stops_per_driver' => 20,
@@ -80,12 +77,13 @@ class CreateTrialMerchant extends Command
                 ]);
             }
 
-            // 4. Trial subscription (30 days)
+            // 4. Trial subscription (7 days)
             MerchantSubscription::create([
-                'merchant_id'  => $merchant->id,
-                'status'       => 'trial',
-                'started_at'   => now(),
-                'expires_at'   => now()->addDays(30),
+                'merchant_id'   => $merchant->id,
+                'status'        => 'trial',
+                'started_at'    => now(),
+                'trial_ends_at' => now()->addDays(7),
+                'expires_at'    => now()->addDays(7),
             ]);
 
             // 5. Owner account
@@ -137,9 +135,7 @@ class CreateTrialMerchant extends Command
             MerchantBranch::create([
                 'merchant_id'          => $merchant->id,
                 'name'                 => 'Gudang Utama',
-                'address'              => 'Jl. Demo No. 1, Bandung',
-                'latitude'             => -6.9175,
-                'longitude'            => 107.6191,
+                'address'              => 'Belum diisi',
                 'is_primary'           => true,
                 'max_stops_per_driver' => 20,
             ]);
@@ -159,7 +155,7 @@ class CreateTrialMerchant extends Command
                     ['Password',        $password],
                     ['Dispatcher Email','dispatcher@' . Str::slug($merchant->company_name) . '.demo'],
                     ['Driver Email',    'driver@' . Str::slug($merchant->company_name) . '.demo'],
-                    ['Trial Expires',   now()->addDays(30)->toDateString()],
+                    ['Trial Expires',   now()->addDays(7)->toDateString()],
                 ]
             );
         });

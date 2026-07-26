@@ -414,6 +414,24 @@ class PlatformDashboardController extends Controller
             ->orderBy('date')
             ->get();
 
+        // Breakdown by API type this month with estimated cost (USD)
+        $byType = DB::table('google_api_usage_logs')
+            ->whereMonth('created_at', $now->month)
+            ->whereYear('created_at', $now->year)
+            ->selectRaw('api_type, COUNT(*) as requests, SUM(estimated_units) as estimated_units, SUM(CASE WHEN cache_hit = 1 THEN 1 ELSE 0 END) as cache_hits')
+            ->groupBy('api_type')
+            ->orderByDesc('requests')
+            ->get()
+            ->map(fn($row) => [
+                'api_type'        => $row->api_type,
+                'requests'        => (int) $row->requests,
+                'estimated_units' => (int) ($row->estimated_units ?? 0),
+                'cache_hits'      => (int) ($row->cache_hits ?? 0),
+                'estimated_cost_usd' => round((int) ($row->estimated_units ?? 0) * 0.005, 2), // $5/1000 units
+            ]);
+
+        $totalCostUsd = round($byType->sum('estimated_cost_usd'), 2);
+
         $calcRate = fn($obj) => ($obj->requests ?? 0) > 0
             ? round(($obj->cache_hits / $obj->requests) * 100, 1)
             : 0;
@@ -427,13 +445,120 @@ class PlatformDashboardController extends Controller
                     'cache_hit_rate'  => $calcRate($today),
                 ],
                 'this_month' => [
-                    'requests'        => (int) ($thisMonth->requests ?? 0),
-                    'estimated_units' => (int) ($thisMonth->units ?? 0),
-                    'cache_hits'      => (int) ($thisMonth->cache_hits ?? 0),
-                    'cache_hit_rate'  => $calcRate($thisMonth),
+                    'requests'           => (int) ($thisMonth->requests ?? 0),
+                    'estimated_units'    => (int) ($thisMonth->units ?? 0),
+                    'cache_hits'         => (int) ($thisMonth->cache_hits ?? 0),
+                    'cache_hit_rate'     => $calcRate($thisMonth),
+                    'estimated_cost_usd' => $totalCostUsd,
                 ],
+                'by_api_type'   => $byType->values(),
                 'top_consumers' => $topConsumers,
                 'daily_trend'   => $dailyTrend,
+            ],
+        ]);
+    }
+
+    // ─── PART 6: System Health / Release Checklist ────────────────────────────
+
+    public function releaseChecklist(): JsonResponse
+    {
+        $checks = [];
+
+        // SMTP
+        $smtpHost = config('mail.mailers.smtp.host');
+        $checks['smtp'] = [
+            'label'  => 'SMTP Mail',
+            'status' => !empty($smtpHost) && $smtpHost !== 'localhost' ? 'ok' : 'warning',
+            'detail' => $smtpHost ?? 'not configured',
+        ];
+
+        // Google Maps API Key
+        $mapsKey = config('services.google.maps_api_key');
+        $checks['google_maps'] = [
+            'label'  => 'Google Maps API Key',
+            'status' => !empty($mapsKey) ? 'ok' : 'error',
+            'detail' => !empty($mapsKey) ? 'set (' . strlen($mapsKey) . ' chars)' : 'GOOGLE_MAPS_API_KEY not set',
+        ];
+
+        // Queue driver
+        $queueDriver = config('queue.default');
+        $checks['queue'] = [
+            'label'  => 'Queue Driver',
+            'status' => in_array($queueDriver, ['redis', 'database', 'sqs']) ? 'ok' : 'warning',
+            'detail' => $queueDriver,
+        ];
+
+        // Cache driver
+        $cacheDriver = config('cache.default');
+        $checks['cache'] = [
+            'label'  => 'Cache Driver',
+            'status' => in_array($cacheDriver, ['redis', 'memcached', 'database']) ? 'ok' : 'warning',
+            'detail' => $cacheDriver,
+        ];
+
+        // Storage writable
+        $storagePath = storage_path('app');
+        $checks['storage'] = [
+            'label'  => 'Storage Writable',
+            'status' => is_writable($storagePath) ? 'ok' : 'error',
+            'detail' => $storagePath,
+        ];
+
+        // Active plans exist
+        $activePlans = DB::table('platform_plans')->where('is_active', true)->count();
+        $checks['plans'] = [
+            'label'  => 'Active Plans',
+            'status' => $activePlans > 0 ? 'ok' : 'error',
+            'detail' => "{$activePlans} active plan(s)",
+        ];
+
+        // Active subscriptions
+        $activeSubs = DB::table('merchant_subscriptions')
+            ->whereIn('status', ['active', 'trial'])
+            ->count();
+        $checks['subscriptions'] = [
+            'label'  => 'Active Subscriptions',
+            'status' => 'ok',
+            'detail' => "{$activeSubs} active/trial",
+        ];
+
+        // Trials expiring in 3 days
+        $expiringTrials = DB::table('merchant_subscriptions')
+            ->where('status', 'trial')
+            ->whereBetween('trial_ends_at', [now(), now()->addDays(3)])
+            ->count();
+        $checks['expiring_trials'] = [
+            'label'  => 'Trials Expiring (3 days)',
+            'status' => $expiringTrials > 0 ? 'warning' : 'ok',
+            'detail' => "{$expiringTrials} trial(s) expiring soon",
+        ];
+
+        // App environment
+        $appEnv = config('app.env');
+        $checks['environment'] = [
+            'label'  => 'App Environment',
+            'status' => $appEnv === 'production' ? 'ok' : 'warning',
+            'detail' => $appEnv,
+        ];
+
+        // Debug mode
+        $debug = config('app.debug');
+        $checks['debug_mode'] = [
+            'label'  => 'Debug Mode',
+            'status' => $debug ? 'error' : 'ok',
+            'detail' => $debug ? 'ON — must be disabled in production' : 'disabled',
+        ];
+
+        $errorCount   = collect($checks)->where('status', 'error')->count();
+        $warningCount = collect($checks)->where('status', 'warning')->count();
+        $overall = $errorCount > 0 ? 'error' : ($warningCount > 0 ? 'warning' : 'ok');
+
+        return response()->json([
+            'data' => [
+                'overall'  => $overall,
+                'errors'   => $errorCount,
+                'warnings' => $warningCount,
+                'checks'   => $checks,
             ],
         ]);
     }
