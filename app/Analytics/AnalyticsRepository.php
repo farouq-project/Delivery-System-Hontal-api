@@ -463,7 +463,7 @@ class AnalyticsRepository
             ->whereNull('deleted_at')
             ->where('delivered_at', '>=', $from)
             ->select([
-                DB::raw('DATE_FORMAT(delivered_at, "%Y-%m") as year_month'),
+                DB::raw('DATE_FORMAT(delivered_at, "%Y-%m") as `year_month`'),
                 DB::raw('COALESCE(SUM(order_value), 0) as revenue'),
                 DB::raw('COUNT(*) as orders'),
             ])
@@ -604,7 +604,7 @@ class AnalyticsRepository
             ->whereNull('deleted_at')
             ->where('created_at', '>=', $from)
             ->select([
-                DB::raw('DATE_FORMAT(created_at, "%Y-%m") as year_month'),
+                DB::raw('DATE_FORMAT(created_at, "%Y-%m") as `year_month`'),
                 DB::raw('COUNT(*) as new_customers'),
             ])
             ->groupByRaw('DATE_FORMAT(created_at, "%Y-%m")')
