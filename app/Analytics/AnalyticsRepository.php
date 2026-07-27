@@ -480,35 +480,37 @@ class AnalyticsRepository
      */
     public function revenueByCustomerType(int $merchantId, Carbon $from, Carbon $to): Collection
     {
-        // Subquery first to resolve customer_type alias, then GROUP BY the plain alias name.
-        // Avoids ONLY_FULL_GROUP_BY rejection on MariaDB strict mode servers.
-        $inner = DB::table('delivery_orders as o')
-            ->leftJoin('customers as c', function ($join) {
-                $join->on('o.customer_id', '=', 'c.id')
-                     ->whereNull('c.deleted_at');
-            })
-            ->where('o.merchant_id', $merchantId)
-            ->where('o.status', BusinessRuleRegistry::REVENUE_STATUS)
-            ->whereNull('o.deleted_at')
-            ->whereBetween('o.delivered_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()])
-            ->select([
-                DB::raw('COALESCE(NULLIF(c.customer_type, ""), "Uncategorized") as ctype'),
-                DB::raw('o.order_value'),
-                DB::raw('o.id as oid'),
-                DB::raw('o.customer_id'),
-            ]);
+        // Raw subquery to avoid ONLY_FULL_GROUP_BY on MariaDB strict mode:
+        // outer query groups by the plain 'ctype' alias so no JOIN column is
+        // referenced outside an aggregate in the outer GROUP BY clause.
+        $rows = DB::select(
+            "SELECT ctype AS customer_type,
+                    COALESCE(SUM(order_value), 0) AS revenue,
+                    COUNT(oid) AS orders,
+                    COUNT(DISTINCT customer_id) AS unique_customers
+             FROM (
+                 SELECT COALESCE(NULLIF(c.customer_type, ''), 'Uncategorized') AS ctype,
+                        o.order_value,
+                        o.id AS oid,
+                        o.customer_id
+                 FROM delivery_orders o
+                 LEFT JOIN customers c ON o.customer_id = c.id AND c.deleted_at IS NULL
+                 WHERE o.merchant_id = ?
+                   AND o.status = ?
+                   AND o.deleted_at IS NULL
+                   AND o.delivered_at BETWEEN ? AND ?
+             ) sub
+             GROUP BY ctype
+             ORDER BY revenue DESC",
+            [
+                $merchantId,
+                BusinessRuleRegistry::REVENUE_STATUS,
+                $from->copy()->startOfDay()->toDateTimeString(),
+                $to->copy()->endOfDay()->toDateTimeString(),
+            ]
+        );
 
-        return DB::table(DB::raw("({$inner->toSql()}) as sub"))
-            ->mergeBindings($inner)
-            ->select([
-                DB::raw('ctype as customer_type'),
-                DB::raw('COALESCE(SUM(order_value), 0) as revenue'),
-                DB::raw('COUNT(oid) as orders'),
-                DB::raw('COUNT(DISTINCT customer_id) as unique_customers'),
-            ])
-            ->groupBy('ctype')
-            ->orderByDesc('revenue')
-            ->get();
+        return collect($rows);
     }
 
     // ── Customer Growth & Segmentation ───────────────────────────────────

@@ -97,10 +97,11 @@ class GrowthDashboardController extends Controller
         $monthStart = Carbon::now()->startOfMonth()->startOfDay();
         $monthEnd   = Carbon::now()->endOfDay();
 
+        // Store as plain array to avoid PHP object deserialization issues in file cache.
         $byCustomerType = Cache::remember(
             "growth.cust_type.{$merchantId}",
             now()->addMinutes(10),
-            fn() => $this->analytics->revenueByCustomerType($merchantId, $monthStart, $monthEnd)
+            fn() => $this->analytics->revenueByCustomerType($merchantId, $monthStart, $monthEnd)->values()->all()
         );
 
         // Top performers (all-time, cached)
@@ -126,7 +127,7 @@ class GrowthDashboardController extends Controller
             'data' => [
                 'period'           => $period,
                 'trend'            => $trend,
-                'by_customer_type' => $byCustomerType->values(),
+                'by_customer_type' => $byCustomerType,
                 'top_customers'    => $topCustomers->values(),
                 'top_products'     => $topProducts->values(),
                 'top_areas'        => $topAreas->take(5)->values(),
