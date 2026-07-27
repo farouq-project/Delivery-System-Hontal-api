@@ -468,7 +468,7 @@ class AnalyticsRepository
                 DB::raw('COUNT(*) as orders'),
             ])
             ->groupByRaw('DATE_FORMAT(delivered_at, "%Y-%m")')
-            ->orderBy('year_month')
+            ->orderByRaw('`year_month` ASC')
             ->get();
     }
 
@@ -608,7 +608,7 @@ class AnalyticsRepository
                 DB::raw('COUNT(*) as new_customers'),
             ])
             ->groupByRaw('DATE_FORMAT(created_at, "%Y-%m")')
-            ->orderBy('year_month')
+            ->orderByRaw('`year_month` ASC')
             ->get();
     }
 
