@@ -480,7 +480,9 @@ class AnalyticsRepository
      */
     public function revenueByCustomerType(int $merchantId, Carbon $from, Carbon $to): Collection
     {
-        return DB::table('delivery_orders as o')
+        // Subquery first to resolve customer_type alias, then GROUP BY the plain alias name.
+        // Avoids ONLY_FULL_GROUP_BY rejection on MariaDB strict mode servers.
+        $inner = DB::table('delivery_orders as o')
             ->leftJoin('customers as c', function ($join) {
                 $join->on('o.customer_id', '=', 'c.id')
                      ->whereNull('c.deleted_at');
@@ -488,14 +490,23 @@ class AnalyticsRepository
             ->where('o.merchant_id', $merchantId)
             ->where('o.status', BusinessRuleRegistry::REVENUE_STATUS)
             ->whereNull('o.deleted_at')
-            ->whereBetween('o.delivered_at', [$from->startOfDay(), $to->copy()->endOfDay()])
+            ->whereBetween('o.delivered_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()])
             ->select([
-                DB::raw('COALESCE(NULLIF(c.customer_type, ""), "Uncategorized") as customer_type'),
-                DB::raw('COALESCE(SUM(o.order_value), 0) as revenue'),
-                DB::raw('COUNT(o.id) as orders'),
-                DB::raw('COUNT(DISTINCT o.customer_id) as unique_customers'),
+                DB::raw('COALESCE(NULLIF(c.customer_type, ""), "Uncategorized") as ctype'),
+                DB::raw('o.order_value'),
+                DB::raw('o.id as oid'),
+                DB::raw('o.customer_id'),
+            ]);
+
+        return DB::table(DB::raw("({$inner->toSql()}) as sub"))
+            ->mergeBindings($inner)
+            ->select([
+                DB::raw('ctype as customer_type'),
+                DB::raw('COALESCE(SUM(order_value), 0) as revenue'),
+                DB::raw('COUNT(oid) as orders'),
+                DB::raw('COUNT(DISTINCT customer_id) as unique_customers'),
             ])
-            ->groupByRaw('COALESCE(NULLIF(c.customer_type, ""), "Uncategorized")')
+            ->groupBy('ctype')
             ->orderByDesc('revenue')
             ->get();
     }
