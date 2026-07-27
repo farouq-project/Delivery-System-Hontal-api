@@ -400,4 +400,319 @@ class AnalyticsRepository
             ->orderByDesc('revenue')
             ->get();
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // GROWTH DASHBOARD METHODS — Added for GD V1
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // ── Time-Series: Revenue ──────────────────────────────────────────────
+
+    /**
+     * Daily revenue series for a date range.
+     * Returns: [{date, revenue, orders}] — one row per day that has deliveries.
+     */
+    public function revenueByDay(int $merchantId, Carbon $from, Carbon $to): Collection
+    {
+        return DB::table('delivery_orders')
+            ->where('merchant_id', $merchantId)
+            ->where('status', BusinessRuleRegistry::REVENUE_STATUS)
+            ->whereNull('deleted_at')
+            ->whereBetween('delivered_at', [$from->startOfDay(), $to->copy()->endOfDay()])
+            ->select([
+                DB::raw('DATE(delivered_at) as date'),
+                DB::raw('COALESCE(SUM(order_value), 0) as revenue'),
+                DB::raw('COUNT(*) as orders'),
+            ])
+            ->groupByRaw('DATE(delivered_at)')
+            ->orderBy('date')
+            ->get();
+    }
+
+    /**
+     * Daily order creation series for a date range.
+     * Returns: [{date, total, delivered, failed}]
+     */
+    public function ordersByDay(int $merchantId, Carbon $from, Carbon $to): Collection
+    {
+        return DB::table('delivery_orders')
+            ->where('merchant_id', $merchantId)
+            ->whereNull('deleted_at')
+            ->whereBetween('order_created_at', [$from->startOfDay(), $to->copy()->endOfDay()])
+            ->select([
+                DB::raw('DATE(order_created_at) as date'),
+                DB::raw('COUNT(*) as total'),
+                DB::raw('COUNT(CASE WHEN status = "delivered" THEN 1 END) as delivered'),
+                DB::raw('COUNT(CASE WHEN status = "failed" THEN 1 END) as failed'),
+            ])
+            ->groupByRaw('DATE(order_created_at)')
+            ->orderBy('date')
+            ->get();
+    }
+
+    /**
+     * Monthly revenue and orders (last N months).
+     * Returns: [{year_month, revenue, orders}] ordered oldest to newest.
+     */
+    public function revenueByMonth(int $merchantId, int $months = 6): Collection
+    {
+        $from = Carbon::now()->startOfMonth()->subMonths($months - 1);
+
+        return DB::table('delivery_orders')
+            ->where('merchant_id', $merchantId)
+            ->where('status', BusinessRuleRegistry::REVENUE_STATUS)
+            ->whereNull('deleted_at')
+            ->where('delivered_at', '>=', $from)
+            ->select([
+                DB::raw('DATE_FORMAT(delivered_at, "%Y-%m") as year_month'),
+                DB::raw('COALESCE(SUM(order_value), 0) as revenue'),
+                DB::raw('COUNT(*) as orders'),
+            ])
+            ->groupByRaw('DATE_FORMAT(delivered_at, "%Y-%m")')
+            ->orderBy('year_month')
+            ->get();
+    }
+
+    // ── Revenue by Customer Type ──────────────────────────────────────────
+
+    /**
+     * Revenue breakdown by customer_type for a period.
+     * Returns: [{customer_type, revenue, orders, unique_customers}]
+     */
+    public function revenueByCustomerType(int $merchantId, Carbon $from, Carbon $to): Collection
+    {
+        return DB::table('delivery_orders as o')
+            ->leftJoin('customers as c', function ($join) {
+                $join->on('o.customer_id', '=', 'c.id')
+                     ->whereNull('c.deleted_at');
+            })
+            ->where('o.merchant_id', $merchantId)
+            ->where('o.status', BusinessRuleRegistry::REVENUE_STATUS)
+            ->whereNull('o.deleted_at')
+            ->whereBetween('o.delivered_at', [$from->startOfDay(), $to->copy()->endOfDay()])
+            ->select([
+                DB::raw('COALESCE(NULLIF(c.customer_type, ""), "Uncategorized") as customer_type'),
+                DB::raw('COALESCE(SUM(o.order_value), 0) as revenue'),
+                DB::raw('COUNT(o.id) as orders'),
+                DB::raw('COUNT(DISTINCT o.customer_id) as unique_customers'),
+            ])
+            ->groupByRaw('COALESCE(NULLIF(c.customer_type, ""), "Uncategorized")')
+            ->orderByDesc('revenue')
+            ->get();
+    }
+
+    // ── Customer Growth & Segmentation ───────────────────────────────────
+
+    /**
+     * Customer segment counts from customer_profiles.
+     * Returns: {healthy, active, at_risk, dormant, lost, total}
+     */
+    public function customerSegmentCounts(int $merchantId): array
+    {
+        $rows = DB::table('customer_profiles')
+            ->where('merchant_id', $merchantId)
+            ->select([
+                'health_status',
+                DB::raw('COUNT(*) as cnt'),
+            ])
+            ->groupBy('health_status')
+            ->get()
+            ->keyBy('health_status');
+
+        $get = fn(string $key): int => (int) ($rows[$key]->cnt ?? 0);
+
+        return [
+            'healthy'  => $get('healthy'),
+            'active'   => $get('active'),
+            'at_risk'  => $get('at_risk'),
+            'dormant'  => $get('dormant'),
+            'lost'     => $get('lost'),
+            'total'    => $rows->sum('cnt'),
+        ];
+    }
+
+    /**
+     * Customer lifetime value distribution buckets.
+     * Returns: {under_100k, k100_500k, k500_1m, over_1m, avg_clv}
+     */
+    public function clvBuckets(int $merchantId): array
+    {
+        $rows = DB::table('delivery_orders')
+            ->where('merchant_id', $merchantId)
+            ->where('status', BusinessRuleRegistry::REVENUE_STATUS)
+            ->whereNull('deleted_at')
+            ->whereNotNull('customer_id')
+            ->select([
+                'customer_id',
+                DB::raw('COALESCE(SUM(order_value), 0) as total_spending'),
+            ])
+            ->groupBy('customer_id')
+            ->get();
+
+        if ($rows->isEmpty()) {
+            return ['under_100k' => 0, 'k100_500k' => 0, 'k500_1m' => 0, 'over_1m' => 0, 'avg_clv' => 0.0];
+        }
+
+        $buckets = ['under_100k' => 0, 'k100_500k' => 0, 'k500_1m' => 0, 'over_1m' => 0];
+        $total   = 0.0;
+
+        foreach ($rows as $row) {
+            $v = (float) $row->total_spending;
+            $total += $v;
+            if ($v < 100_000)        $buckets['under_100k']++;
+            elseif ($v < 500_000)    $buckets['k100_500k']++;
+            elseif ($v < 1_000_000)  $buckets['k500_1m']++;
+            else                     $buckets['over_1m']++;
+        }
+
+        $buckets['avg_clv'] = round($total / $rows->count(), 0);
+        return $buckets;
+    }
+
+    /**
+     * Average order frequency for customers with ≥2 orders.
+     */
+    public function avgOrderFrequency(int $merchantId): float
+    {
+        $result = DB::table('delivery_orders')
+            ->where('merchant_id', $merchantId)
+            ->where('status', BusinessRuleRegistry::REVENUE_STATUS)
+            ->whereNull('deleted_at')
+            ->whereNotNull('customer_id')
+            ->select([
+                'customer_id',
+                DB::raw('COUNT(*) as order_count'),
+            ])
+            ->groupBy('customer_id')
+            ->having('order_count', '>=', 2)
+            ->get();
+
+        if ($result->isEmpty()) return 0.0;
+
+        return round($result->avg('order_count'), 1);
+    }
+
+    /**
+     * Monthly new customer acquisition series (last N months).
+     * Returns: [{year_month, new_customers}]
+     */
+    public function customerAcquisitionByMonth(int $merchantId, int $months = 6): Collection
+    {
+        $from = Carbon::now()->startOfMonth()->subMonths($months - 1);
+
+        return DB::table('customers')
+            ->where('merchant_id', $merchantId)
+            ->whereNull('deleted_at')
+            ->where('created_at', '>=', $from)
+            ->select([
+                DB::raw('DATE_FORMAT(created_at, "%Y-%m") as year_month'),
+                DB::raw('COUNT(*) as new_customers'),
+            ])
+            ->groupByRaw('DATE_FORMAT(created_at, "%Y-%m")')
+            ->orderBy('year_month')
+            ->get();
+    }
+
+    // ── Operations Intelligence ───────────────────────────────────────────
+
+    /**
+     * Average minutes from order creation to driver assignment (last 30 days).
+     * Returns null when no assigned orders found.
+     */
+    public function avgDispatchMinutes(int $merchantId, int $days = 30): ?float
+    {
+        $from = Carbon::now()->subDays($days);
+
+        $result = DB::table('delivery_orders')
+            ->where('merchant_id', $merchantId)
+            ->whereNull('deleted_at')
+            ->whereNotNull('assigned_at')
+            ->where('order_created_at', '>=', $from)
+            ->selectRaw('AVG(TIMESTAMPDIFF(MINUTE, order_created_at, assigned_at)) as avg_min')
+            ->value('avg_min');
+
+        return $result !== null ? round((float) $result, 1) : null;
+    }
+
+    /**
+     * Average minutes from pickup to delivery (last 30 days).
+     * Returns null when no matching orders found.
+     */
+    public function avgDeliveryMinutes(int $merchantId, int $days = 30): ?float
+    {
+        $from = Carbon::now()->subDays($days);
+
+        $result = DB::table('delivery_orders')
+            ->where('merchant_id', $merchantId)
+            ->where('status', BusinessRuleRegistry::REVENUE_STATUS)
+            ->whereNull('deleted_at')
+            ->whereNotNull('picked_up_at')
+            ->whereNotNull('delivered_at')
+            ->where('delivered_at', '>=', $from)
+            ->selectRaw('AVG(TIMESTAMPDIFF(MINUTE, picked_up_at, delivered_at)) as avg_min')
+            ->value('avg_min');
+
+        return $result !== null ? round((float) $result, 1) : null;
+    }
+
+    /**
+     * Average route quality score from routes in last 30 days.
+     * Returns null when no routes with quality_score found.
+     */
+    public function avgRouteQualityScore(int $merchantId, int $days = 30): ?float
+    {
+        $from = Carbon::now()->subDays($days);
+
+        $result = DB::table('routes')
+            ->where('merchant_id', $merchantId)
+            ->whereNotNull('quality_score')
+            ->where('route_date', '>=', $from->toDateString())
+            ->avg('quality_score');
+
+        return $result !== null ? round((float) $result, 1) : null;
+    }
+
+    /**
+     * Delivered orders today divided by active driver count.
+     */
+    public function ordersPerDriver(int $merchantId): float
+    {
+        $activeDrivers = DB::table('drivers')
+            ->where('merchant_id', $merchantId)
+            ->where('is_active', true)
+            ->count();
+
+        if ($activeDrivers === 0) return 0.0;
+
+        $ordersToday = DB::table('delivery_orders')
+            ->where('merchant_id', $merchantId)
+            ->where('status', BusinessRuleRegistry::REVENUE_STATUS)
+            ->whereNull('deleted_at')
+            ->whereDate('delivered_at', Carbon::today())
+            ->count();
+
+        return round($ordersToday / $activeDrivers, 1);
+    }
+
+    /**
+     * Percentage of active drivers who delivered at least one order today.
+     */
+    public function driverUtilizationToday(int $merchantId): float
+    {
+        $activeDrivers = DB::table('drivers')
+            ->where('merchant_id', $merchantId)
+            ->where('is_active', true)
+            ->count();
+
+        if ($activeDrivers === 0) return 0.0;
+
+        $driversWithDelivery = DB::table('delivery_orders')
+            ->where('merchant_id', $merchantId)
+            ->where('status', BusinessRuleRegistry::REVENUE_STATUS)
+            ->whereNull('deleted_at')
+            ->whereDate('delivered_at', Carbon::today())
+            ->distinct('driver_id')
+            ->count('driver_id');
+
+        return round($driversWithDelivery / $activeDrivers * 100, 1);
+    }
 }

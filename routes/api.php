@@ -2,6 +2,9 @@
 
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BusinessIntelligenceController;
+use App\Http\Controllers\Api\V1\GrowthDashboardController;
+use App\Http\Controllers\Api\V1\MarketingCampaignController;
+use App\Http\Controllers\Api\V1\GoalController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\CustomerDomainController;
 use App\Http\Controllers\Api\V1\ExecutiveDashboardController;
@@ -224,6 +227,7 @@ Route::prefix('v1')->group(function () {
     Route::middleware(['auth:sanctum', 'role:super_admin,merchant_owner,developer'])
         ->prefix('bi')
         ->group(function () {
+            // Existing BI endpoints — DO NOT MODIFY (backward compatibility)
             Route::get('overview',   [BusinessIntelligenceController::class, 'overview']);
             Route::get('customers',  [BusinessIntelligenceController::class, 'customers']);
             Route::get('operations', [BusinessIntelligenceController::class, 'operations']);
@@ -232,6 +236,21 @@ Route::prefix('v1')->group(function () {
             Route::get('products',   [BusinessIntelligenceController::class, 'products']);
             Route::get('areas',      [BusinessIntelligenceController::class, 'areas']);
             Route::get('attention',  [BusinessIntelligenceController::class, 'attention']);
+
+            // ─── Growth Dashboard V1 (GD1) ────────────────────────────────────
+            Route::prefix('growth')->group(function () {
+                Route::get('executive', [GrowthDashboardController::class, 'executive']);
+                Route::get('sales',     [GrowthDashboardController::class, 'sales']);
+                Route::get('customers', [GrowthDashboardController::class, 'customers']);
+                Route::get('reports',    [GrowthDashboardController::class, 'reports']);
+                Route::get('operations', [GrowthDashboardController::class, 'operations']);
+
+                Route::apiResource('marketing', MarketingCampaignController::class)
+                    ->parameters(['marketing' => 'marketingCampaign']);
+                Route::apiResource('goals', GoalController::class)
+                    ->parameters(['goals' => 'merchantGoal'])
+                    ->except(['show']);
+            });
         });
 
     // ─── USER MANAGEMENT (developer / super_admin / merchant_owner) ───
