@@ -246,10 +246,12 @@ Route::prefix('v1')->group(function () {
                 Route::get('operations', [GrowthDashboardController::class, 'operations']);
 
                 Route::apiResource('marketing', MarketingCampaignController::class)
-                    ->parameters(['marketing' => 'marketingCampaign']);
+                    ->parameters(['marketing' => 'marketingCampaign'])
+                    ->middleware('block_viewing_writes');
                 Route::apiResource('goals', GoalController::class)
                     ->parameters(['goals' => 'merchantGoal'])
-                    ->except(['show']);
+                    ->except(['show'])
+                    ->middleware('block_viewing_writes');
             });
         });
 
@@ -283,6 +285,7 @@ Route::prefix('v1')->group(function () {
         Route::delete('applications/{application}',              [ApplicationController::class, 'destroy']);
 
         // Merchant directory & management
+        Route::get('merchants/growth-targets',                         [AdminMerchantController::class, 'growthTargets']);
         Route::get('merchants',                                        [AdminMerchantController::class, 'index']);
         Route::get('merchants/{merchant}',                             [AdminMerchantController::class, 'show']);
         Route::patch('merchants/{merchant}/status',                    [AdminMerchantController::class, 'updateStatus']);

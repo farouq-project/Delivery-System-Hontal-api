@@ -34,7 +34,10 @@ class MarketingCampaignController extends Controller
     {
         if ($err = $this->guard($request)) return $err;
 
-        $merchantId = (int) $request->user()->merchant_id;
+        $user = $request->user();
+        $merchantId = in_array($user->role, ['super_admin', 'developer']) && $request->has('merchant_id')
+            ? (int) $request->query('merchant_id')
+            : (int) $user->merchant_id;
 
         return response()->json([
             'data' => [

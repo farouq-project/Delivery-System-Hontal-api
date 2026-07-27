@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Analytics\AnalyticsRepository;
 use App\Analytics\BusinessRuleRegistry;
 use App\Http\Controllers\Controller;
+use App\Models\Merchant;
 use App\Models\Customer;
 use App\Models\MerchantGoal;
 use App\Services\CustomerDomain\CustomerHealthService;
@@ -52,7 +53,20 @@ class GrowthDashboardController extends Controller
 
     private function merchantId(Request $request): int
     {
-        return (int) $request->user()->merchant_id;
+        $user = $request->user();
+        if (in_array($user->role, ['super_admin', 'developer']) && $request->has('merchant_id')) {
+            return (int) $request->query('merchant_id');
+        }
+        return (int) $user->merchant_id;
+    }
+
+    private function merchantModel(Request $request): Merchant
+    {
+        $user = $request->user();
+        if (in_array($user->role, ['super_admin', 'developer']) && $request->has('merchant_id')) {
+            return Merchant::findOrFail((int) $request->query('merchant_id'));
+        }
+        return $user->merchant;
     }
 
     // ── Module 1: Executive Overview ──────────────────────────────────────
@@ -62,7 +76,7 @@ class GrowthDashboardController extends Controller
         if ($err = $this->guard($request)) return $err;
 
         $merchantId = $this->merchantId($request);
-        $merchant   = $request->user()->merchant;
+        $merchant   = $this->merchantModel($request);
 
         $healthScore   = $this->health->getScore($merchantId);
         $comparison    = $this->growth->monthComparison($merchant);
@@ -85,7 +99,7 @@ class GrowthDashboardController extends Controller
         if ($err = $this->guard($request)) return $err;
 
         $merchantId = $this->merchantId($request);
-        $merchant   = $request->user()->merchant;
+        $merchant   = $this->merchantModel($request);
 
         $period = $request->query('period', 'monthly'); // weekly | monthly
 
@@ -240,7 +254,7 @@ class GrowthDashboardController extends Controller
         if ($err = $this->guard($request)) return $err;
 
         $merchantId = $this->merchantId($request);
-        $merchant   = $request->user()->merchant;
+        $merchant   = $this->merchantModel($request);
         $period     = $request->query('period', 'monthly'); // monthly | quarterly | yearly
 
         [$from, $to, $periodLabel] = $this->resolvePeriod($period);

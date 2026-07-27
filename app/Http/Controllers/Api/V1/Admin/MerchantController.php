@@ -24,6 +24,26 @@ class MerchantController extends Controller
         private readonly MerchantProvisioningService $provisioningService
     ) {}
 
+    public function growthTargets(): JsonResponse
+    {
+        $merchants = Merchant::query()
+            ->select('merchants.id', 'merchants.company_name', 'merchants.email', 'merchants.city')
+            ->with(['subscription.plan:id,name,slug'])
+            ->orderBy('merchants.company_name')
+            ->get()
+            ->map(fn($m) => [
+                'id'           => $m->id,
+                'company_name' => $m->company_name,
+                'email'        => $m->email,
+                'city'         => $m->city,
+                'plan_name'    => $m->subscription?->plan?->name,
+                'plan_slug'    => $m->subscription?->plan?->slug,
+                'sub_status'   => $m->subscription?->status,
+            ]);
+
+        return response()->json(['data' => $merchants]);
+    }
+
     public function index(Request $request)
     {
         $query = Merchant::query()
