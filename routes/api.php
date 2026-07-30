@@ -161,7 +161,7 @@ Route::prefix('v1')->group(function () {
         Route::get('subscription', [MerchantSubscriptionController::class, 'show']);
 
         // ─── Merchant Platform (Phase 3 — role-gated inside controller) ─
-        Route::prefix('settings/platform')->group(function () {
+        Route::prefix('settings/platform')->middleware('block_viewing_writes')->group(function () {
             // Business Profile (company identity — from merchants table)
             Route::get('profile',  [MerchantPlatformController::class, 'getProfile']);
             Route::patch('profile', [MerchantPlatformController::class, 'updateProfile']);

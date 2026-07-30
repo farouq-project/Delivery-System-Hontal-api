@@ -17,14 +17,19 @@ class MerchantPlatformController extends Controller
         private readonly FeatureManager $features,
     ) {}
 
-    // Returns the authenticated merchant_id after role + feature-flag checks.
-    // Aborts with 403 on any failure.
+    // Returns the resolved merchant_id after role + feature-flag checks.
+    // Super admin / developer can pass ?merchant_id to read any merchant's settings.
     private function gate(Request $request): int
     {
         $user = $request->user();
 
         if (!in_array($user->role, self::OWNER_ROLES)) {
             abort(403, 'Insufficient role.');
+        }
+
+        // Viewing-mode override: super_admin / developer with ?merchant_id
+        if (in_array($user->role, ['super_admin', 'developer']) && $request->has('merchant_id')) {
+            return (int) $request->query('merchant_id');
         }
 
         $merchantId = $user->merchant_id;

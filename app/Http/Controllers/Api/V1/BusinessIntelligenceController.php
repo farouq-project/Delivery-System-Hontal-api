@@ -21,6 +21,15 @@ class BusinessIntelligenceController extends Controller
 
     // ── Auth / Feature Gate ───────────────────────────────────────────────────
 
+    private function merchantId(Request $request): ?int
+    {
+        $user = $request->user();
+        if (in_array($user->role, ['super_admin', 'developer']) && $request->has('merchant_id')) {
+            return (int) $request->query('merchant_id');
+        }
+        return $user->merchant_id ? (int) $user->merchant_id : null;
+    }
+
     private function guard(Request $request): ?JsonResponse
     {
         $user = $request->user();
@@ -29,13 +38,13 @@ class BusinessIntelligenceController extends Controller
             return response()->json(['message' => 'Business Intelligence is restricted to merchant owners.'], 403);
         }
 
-        if (!$user->merchant_id) {
+        if (!$this->merchantId($request)) {
             return response()->json(['message' => 'No merchant context.'], 403);
         }
 
         // super_admin and developer always bypass the feature flag
         if (!in_array($user->role, ['super_admin', 'developer'])) {
-            if (!$this->features->isEnabled($user->merchant_id, self::FEATURE)) {
+            if (!$this->features->isEnabled((int) $user->merchant_id, self::FEATURE)) {
                 return response()->json(['message' => 'Business Intelligence is not enabled for this merchant.'], 403);
             }
         }
@@ -54,7 +63,7 @@ class BusinessIntelligenceController extends Controller
     public function overview(Request $request): JsonResponse
     {
         if ($err = $this->guard($request)) return $err;
-        $mid = $request->user()->merchant_id;
+        $mid = $this->merchantId($request);
 
         return response()->json([
             'data' => $this->metrics->getOverview($mid, $this->timezone($mid)),
@@ -64,7 +73,7 @@ class BusinessIntelligenceController extends Controller
     public function customers(Request $request): JsonResponse
     {
         if ($err = $this->guard($request)) return $err;
-        $mid = $request->user()->merchant_id;
+        $mid = $this->merchantId($request);
 
         return response()->json([
             'data' => $this->metrics->getCustomerInsights($mid, $this->timezone($mid)),
@@ -74,7 +83,7 @@ class BusinessIntelligenceController extends Controller
     public function operations(Request $request): JsonResponse
     {
         if ($err = $this->guard($request)) return $err;
-        $mid = $request->user()->merchant_id;
+        $mid = $this->merchantId($request);
 
         return response()->json([
             'data' => $this->metrics->getOperationsInsights($mid, $this->timezone($mid)),
@@ -84,7 +93,7 @@ class BusinessIntelligenceController extends Controller
     public function drivers(Request $request): JsonResponse
     {
         if ($err = $this->guard($request)) return $err;
-        $mid = $request->user()->merchant_id;
+        $mid = $this->merchantId($request);
 
         return response()->json([
             'data' => $this->metrics->getDriverInsights($mid),
@@ -94,7 +103,7 @@ class BusinessIntelligenceController extends Controller
     public function branches(Request $request): JsonResponse
     {
         if ($err = $this->guard($request)) return $err;
-        $mid = $request->user()->merchant_id;
+        $mid = $this->merchantId($request);
 
         return response()->json([
             'data' => $this->metrics->getBranchInsights($mid),
@@ -104,7 +113,7 @@ class BusinessIntelligenceController extends Controller
     public function products(Request $request): JsonResponse
     {
         if ($err = $this->guard($request)) return $err;
-        $mid = $request->user()->merchant_id;
+        $mid = $this->merchantId($request);
 
         return response()->json([
             'data' => $this->metrics->getProductInsights($mid),
@@ -114,7 +123,7 @@ class BusinessIntelligenceController extends Controller
     public function areas(Request $request): JsonResponse
     {
         if ($err = $this->guard($request)) return $err;
-        $mid = $request->user()->merchant_id;
+        $mid = $this->merchantId($request);
 
         return response()->json([
             'data' => $this->metrics->getAreaInsights($mid),
@@ -124,7 +133,7 @@ class BusinessIntelligenceController extends Controller
     public function attention(Request $request): JsonResponse
     {
         if ($err = $this->guard($request)) return $err;
-        $mid = $request->user()->merchant_id;
+        $mid = $this->merchantId($request);
 
         return response()->json([
             'data' => $this->metrics->getRequiresAttention($mid),
