@@ -27,7 +27,7 @@ class MerchantController extends Controller
     public function growthTargets(): JsonResponse
     {
         $merchants = Merchant::query()
-            ->select('merchants.id', 'merchants.company_name', 'merchants.email', 'merchants.city')
+            ->select('merchants.id', 'merchants.company_name', 'merchants.email')
             ->with(['subscription.plan:id,name,slug'])
             ->orderBy('merchants.company_name')
             ->get()
@@ -35,11 +35,12 @@ class MerchantController extends Controller
                 'id'           => $m->id,
                 'company_name' => $m->company_name,
                 'email'        => $m->email,
-                'city'         => $m->city,
+                'city'         => null,
                 'plan_name'    => $m->subscription?->plan?->name,
                 'plan_slug'    => $m->subscription?->plan?->slug,
                 'sub_status'   => $m->subscription?->status,
-            ]);
+            ])
+            ->values();
 
         return response()->json(['data' => $merchants]);
     }
