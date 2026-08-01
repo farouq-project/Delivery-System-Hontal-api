@@ -3,11 +3,8 @@
 namespace App\Services\Growth;
 
 use App\Analytics\AnalyticsRepository;
-use App\Analytics\BusinessRuleRegistry;
-use App\Services\Growth\MerchantGrowthService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 
 /**
  * Computes a 0–100 Business Health Score for a merchant.
@@ -28,6 +25,7 @@ class BusinessHealthScoreService
     public function __construct(
         private readonly AnalyticsRepository $analytics,
         private readonly GrowthMetricsRepository $growthRepo,
+        private readonly GoalService $goalService,
     ) {}
 
     public function getScore(int $merchantId): array
@@ -196,21 +194,14 @@ class BusinessHealthScoreService
 
     private function goalsScore(int $merchantId): array
     {
-        $today = now()->toDateString();
+        $progress = $this->goalService->getProgress($merchantId);
+        $active   = array_filter($progress, fn($g) => $g['is_active']);
 
-        $goals = DB::table('merchant_goals')
-            ->where('merchant_id', $merchantId)
-            ->where('period_start', '<=', $today)
-            ->where('period_end', '>=', $today)
-            ->get();
-
-        if ($goals->isEmpty()) {
-            // No goals = neutral 10 pts; encourages goal-setting without penalizing
+        if (empty($active)) {
             return $this->pillar('goals', 10, 'No active goals set (neutral)', null);
         }
 
-        // Average goal completion % maps to 0–20
-        $avgPct = $goals->avg('achievement_pct') ?? 0.0;
+        $avgPct = collect($active)->avg('raw_pct') ?? 0.0;
 
         $score = match (true) {
             $avgPct >= 100 => 20,

@@ -30,6 +30,14 @@ class GoalController extends Controller
         return null;
     }
 
+    private function merchantId(Request $request): int
+    {
+        $user = $request->user();
+        return (in_array($user->role, ['super_admin', 'developer']) && $request->has('merchant_id'))
+            ? (int) $request->query('merchant_id')
+            : (int) $user->merchant_id;
+    }
+
     public function index(Request $request): JsonResponse
     {
         if ($err = $this->guard($request)) return $err;
@@ -65,6 +73,7 @@ class GoalController extends Controller
     public function update(Request $request, MerchantGoal $merchantGoal): JsonResponse
     {
         if ($err = $this->guard($request)) return $err;
+        abort_if($merchantGoal->merchant_id !== $this->merchantId($request), 403, 'Forbidden.');
 
         $data = $request->validate([
             'metric'       => 'sometimes|in:revenue,orders,customers,success_rate,new_customers',
@@ -83,6 +92,7 @@ class GoalController extends Controller
     public function destroy(Request $request, MerchantGoal $merchantGoal): JsonResponse
     {
         if ($err = $this->guard($request)) return $err;
+        abort_if($merchantGoal->merchant_id !== $this->merchantId($request), 403, 'Forbidden.');
 
         $this->service->delete($merchantGoal);
 

@@ -63,10 +63,11 @@ class BusinessIntelligenceController extends Controller
     public function overview(Request $request): JsonResponse
     {
         if ($err = $this->guard($request)) return $err;
-        $mid = $this->merchantId($request);
+        $mid   = $this->merchantId($request);
+        $month = $request->query('month'); // optional 'YYYY-MM'
 
         return response()->json([
-            'data' => $this->metrics->getOverview($mid, $this->timezone($mid)),
+            'data' => $this->metrics->getOverview($mid, $this->timezone($mid), $month),
         ]);
     }
 

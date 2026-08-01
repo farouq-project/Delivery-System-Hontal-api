@@ -112,11 +112,15 @@ class GrowthDashboardController extends Controller
         $monthEnd   = Carbon::now()->endOfDay();
 
         // Store as plain array to avoid PHP object deserialization issues in file cache.
-        $byCustomerType = Cache::remember(
-            "growth.cust_type.{$merchantId}",
-            now()->addMinutes(10),
-            fn() => $this->analytics->revenueByCustomerType($merchantId, $monthStart, $monthEnd)->values()->all()
-        );
+        try {
+            $byCustomerType = Cache::remember(
+                "growth.cust_type.{$merchantId}",
+                now()->addMinutes(10),
+                fn() => $this->analytics->revenueByCustomerType($merchantId, $monthStart, $monthEnd)->values()->all()
+            );
+        } catch (\Throwable $e) {
+            $byCustomerType = [];
+        }
 
         // Top performers (all-time, cached)
         $topCustomers = Cache::remember(
@@ -198,7 +202,7 @@ class GrowthDashboardController extends Controller
         );
 
         // Dormant customers (from customer_profiles)
-        $dormantCount = $segments['dormant'] + $segments['lost'];
+        $dormantCount = ($segments['dormant'] ?? 0) + ($segments['lost'] ?? 0);
 
         // Top customers by value (all-time)
         $topByValue = Cache::remember(

@@ -48,12 +48,12 @@ class BusinessMetricsService
     /**
      * Revenue, orders, averages, and customer growth for the current calendar month.
      */
-    public function getBusinessThisMonth(int $merchantId, string $timezone): array
+    public function getBusinessThisMonth(int $merchantId, string $timezone, ?Carbon $from = null, ?Carbon $to = null): array
     {
-        $from     = Carbon::now($timezone)->startOfMonth();
-        $to       = Carbon::now($timezone)->endOfMonth();
-        $lastFrom = Carbon::now($timezone)->subMonth()->startOfMonth();
-        $lastTo   = Carbon::now($timezone)->subMonth()->endOfMonth();
+        $from     = $from ?? Carbon::now($timezone)->startOfMonth();
+        $to       = $to   ?? Carbon::now($timezone)->endOfMonth();
+        $lastFrom = $from->copy()->subMonth()->startOfMonth();
+        $lastTo   = $from->copy()->subMonth()->endOfMonth();
 
         $delivered    = $this->repository->deliveredRevenueForPeriod($merchantId, $from, $to);
         $deliveredCnt = $delivered['count'];
@@ -248,10 +248,18 @@ class BusinessMetricsService
     /**
      * 60-second business overview: highlights from every section.
      */
-    public function getOverview(int $merchantId, string $timezone): array
+    public function getOverview(int $merchantId, string $timezone, ?string $month = null): array
     {
+        $monthFrom = null;
+        $monthTo   = null;
+        if ($month && preg_match('/^\d{4}-\d{2}$/', $month)) {
+            [$y, $m]   = explode('-', $month);
+            $monthFrom = Carbon::create((int) $y, (int) $m, 1, 0, 0, 0, $timezone)->startOfMonth();
+            $monthTo   = $monthFrom->copy()->endOfMonth();
+        }
+
         $operationsToday = $this->getOperationsToday($merchantId, $timezone);
-        $businessMonth   = $this->getBusinessThisMonth($merchantId, $timezone);
+        $businessMonth   = $this->getBusinessThisMonth($merchantId, $timezone, $monthFrom, $monthTo);
         $customerHealth  = $this->getCustomerHealth($merchantId, $timezone);
         $attention       = $this->getRequiresAttention($merchantId);
 

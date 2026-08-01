@@ -26,7 +26,7 @@ class Customer extends Model
         'ulid', 'merchant_id', 'customer_name', 'phone', 'email',
         'default_address', 'default_latitude', 'default_longitude',
         'location_source', 'location_last_verified_at',
-        'vip_level', 'cluster', 'notes', 'total_orders', 'last_order_at', 'is_active',
+        'vip_level', 'cluster', 'customer_type', 'notes', 'total_orders', 'last_order_at', 'is_active',
     ];
 
     protected $casts = [

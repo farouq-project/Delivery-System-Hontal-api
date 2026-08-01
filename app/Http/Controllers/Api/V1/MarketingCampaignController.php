@@ -30,6 +30,14 @@ class MarketingCampaignController extends Controller
         return null;
     }
 
+    private function merchantId(Request $request): int
+    {
+        $user = $request->user();
+        return (in_array($user->role, ['super_admin', 'developer']) && $request->has('merchant_id'))
+            ? (int) $request->query('merchant_id')
+            : (int) $user->merchant_id;
+    }
+
     public function index(Request $request): JsonResponse
     {
         if ($err = $this->guard($request)) return $err;
@@ -79,6 +87,7 @@ class MarketingCampaignController extends Controller
     public function show(Request $request, MarketingCampaign $marketingCampaign): JsonResponse
     {
         if ($err = $this->guard($request)) return $err;
+        abort_if($marketingCampaign->merchant_id !== $this->merchantId($request), 403, 'Forbidden.');
 
         return response()->json(['data' => $marketingCampaign->appendKpis()]);
     }
@@ -86,6 +95,7 @@ class MarketingCampaignController extends Controller
     public function update(Request $request, MarketingCampaign $marketingCampaign): JsonResponse
     {
         if ($err = $this->guard($request)) return $err;
+        abort_if($marketingCampaign->merchant_id !== $this->merchantId($request), 403, 'Forbidden.');
 
         $data = $request->validate([
             'name'              => 'sometimes|string|max:255',
@@ -114,6 +124,7 @@ class MarketingCampaignController extends Controller
     public function destroy(Request $request, MarketingCampaign $marketingCampaign): JsonResponse
     {
         if ($err = $this->guard($request)) return $err;
+        abort_if($marketingCampaign->merchant_id !== $this->merchantId($request), 403, 'Forbidden.');
 
         $this->service->delete($marketingCampaign);
 
