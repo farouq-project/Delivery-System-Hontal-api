@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (Schema::hasTable('proof_of_deliveries')) {
+            return;
+        }
+
         Schema::create('proof_of_deliveries', function (Blueprint $table) {
             $table->id();
             $table->foreignId('order_id')->unique()->constrained('delivery_orders')->cascadeOnDelete();
