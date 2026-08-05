@@ -10,6 +10,8 @@ return [
     'allowed_origins_patterns' => [
         '#^https://[a-z0-9\-]+-[a-z0-9]+-[a-z0-9]+\.vercel\.app$#',
         '#^https://delivery-system-hontal-web\.vercel\.app$#',
+        '#^https://[a-z0-9\-]+\.hontal\.id$#',
+        '#^https://hontal\.id$#',
         '#^http://localhost(:\d+)?$#',
         '#^http://127\.0\.0\.1(:\d+)?$#',
         '#^http://192\.168\.\d+\.\d+(:\d+)?$#',
