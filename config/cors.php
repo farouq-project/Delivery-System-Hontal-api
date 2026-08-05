@@ -3,8 +3,18 @@
 return [
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
     'allowed_methods' => ['*'],
-    'allowed_origins' => [env('FRONTEND_URL', 'http://localhost:3000')],
-    'allowed_origins_patterns' => [],
+    'allowed_origins' => array_filter([
+        env('FRONTEND_URL'),
+        env('APP_URL'),
+    ]),
+    'allowed_origins_patterns' => [
+        '#^https://[a-z0-9\-]+-[a-z0-9]+-[a-z0-9]+\.vercel\.app$#',
+        '#^https://delivery-system-hontal-web\.vercel\.app$#',
+        '#^http://localhost(:\d+)?$#',
+        '#^http://127\.0\.0\.1(:\d+)?$#',
+        '#^http://192\.168\.\d+\.\d+(:\d+)?$#',
+        '#^http://10\.\d+\.\d+\.\d+(:\d+)?$#',
+    ],
     'allowed_headers' => ['*'],
     'exposed_headers' => [],
     'max_age' => 0,
