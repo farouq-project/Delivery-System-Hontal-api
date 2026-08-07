@@ -167,7 +167,7 @@ class CrmProspectController extends Controller
         $request->validate(['file' => 'required|file|mimes:csv,txt|max:4096']);
 
         ['rows' => $rows, 'skipped' => $skipped, 'errors' => $errors] =
-            $this->parseCsv($request->file('file'), previewOnly: true);
+            $this->parseCsv($request->file('file'));
 
         return response()->json([
             'data' => [
@@ -184,8 +184,12 @@ class CrmProspectController extends Controller
     {
         $request->validate(['file' => 'required|file|mimes:csv,txt|max:4096']);
 
-        ['rows' => $rows, 'skipped' => $skipped, 'errors' => $errors] =
-            $this->parseCsv($request->file('file'), previewOnly: false);
+        try {
+            ['rows' => $rows, 'skipped' => $skipped, 'errors' => $errors] =
+                $this->parseCsv($request->file('file'));
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'Gagal membaca file CSV: ' . $e->getMessage()], 422);
+        }
 
         $created = 0;
         foreach ($rows as $row) {
@@ -193,7 +197,7 @@ class CrmProspectController extends Controller
             try {
                 CrmProspect::create($row);
                 $created++;
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 $skipped++;
                 $errors[] = "Row skipped: {$row['business_name']} — {$e->getMessage()}";
             }
@@ -208,7 +212,28 @@ class CrmProspectController extends Controller
         ]);
     }
 
-    private function parseCsv(\Illuminate\Http\UploadedFile $file, bool $previewOnly): array
+    private const CATEGORY_ALIASES = [
+        'frozen food'     => 'frozen',
+        'frozen foods'    => 'frozen',
+        'katering'        => 'catering',
+        'katering harian' => 'catering',
+        'catering harian' => 'catering',
+        'apotek'          => 'other',
+        'farmasi'         => 'other',
+        'laundry'         => 'other',
+        'retail'          => 'wholesale',
+        'grosir'          => 'wholesale',
+        'sembako'         => 'wholesale',
+        'bakery'          => 'bakery',
+        'roti'            => 'bakery',
+        'cake'            => 'bakery',
+        'air'             => 'water',
+        'galon'           => 'water',
+        'telur'           => 'egg',
+        'ayam'            => 'other',
+    ];
+
+    private function parseCsv(\Illuminate\Http\UploadedFile $file): array
     {
         $headerMap = [
             'business name'  => 'business_name',
@@ -228,7 +253,11 @@ class CrmProspectController extends Controller
             'pipeline_stage' => 'pipeline_stage',
         ];
 
-        $handle  = fopen($file->getRealPath(), 'r');
+        $handle = fopen($file->getRealPath(), 'r');
+        if ($handle === false) {
+            throw new \RuntimeException('Cannot open uploaded file.');
+        }
+
         $headers = null;
         $rows    = [];
         $skipped = 0;
@@ -252,8 +281,9 @@ class CrmProspectController extends Controller
 
             foreach ($record as $col => $val) {
                 $field = $headerMap[$col] ?? null;
-                if ($field && trim($val) !== '') {
-                    $mapped[$field] = trim($val);
+                $val   = trim($val);
+                if ($field && $val !== '') {
+                    $mapped[$field] = $val;
                 }
             }
 
@@ -267,9 +297,29 @@ class CrmProspectController extends Controller
             $stage = strtolower($mapped['pipeline_stage'] ?? '');
             $mapped['pipeline_stage'] = in_array($stage, self::STAGES) ? $stage : 'new';
 
-            // Normalize category/industry
+            // Normalize category/industry — check aliases then direct match
             $cat = strtolower($mapped['category'] ?? '');
-            $mapped['category'] = in_array($cat, self::CATEGORIES) ? $cat : null;
+            if (isset(self::CATEGORY_ALIASES[$cat])) {
+                $mapped['category'] = self::CATEGORY_ALIASES[$cat];
+            } elseif (in_array($cat, self::CATEGORIES)) {
+                $mapped['category'] = $cat;
+            } else {
+                $mapped['category'] = null;
+            }
+
+            // Normalize phone — fix Excel scientific notation (e.g. 8.22258E+11 → 822258000000)
+            if (!empty($mapped['phone'])) {
+                $phone = $mapped['phone'];
+                if (preg_match('/^[\d.]+[Ee][+\-]?\d+$/', $phone)) {
+                    $phone = number_format((float) $phone, 0, '.', '');
+                }
+                $mapped['phone'] = substr(preg_replace('/[^\d+]/', '', $phone), 0, 30);
+            }
+
+            // Truncate address to fit the column
+            if (!empty($mapped['address'])) {
+                $mapped['address'] = mb_substr($mapped['address'], 0, 500);
+            }
 
             $rows[] = $mapped;
         }
