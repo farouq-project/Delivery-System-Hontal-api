@@ -125,17 +125,17 @@ class DemoSeeder extends Seeder
         ]);
         User::create([
             'ulid' => Str::ulid(), 'merchant_id' => $merchant->id,
-            'name' => 'Sari Admin', 'email' => 'dispatcher@kencanalima.id',
+            'name' => 'Sari Admin', 'email' => 'dispatcher@ombar.id',
             'password' => Hash::make('password'), 'role' => 'dispatcher', 'is_active' => true,
         ]);
 
         // ── Drivers ───────────────────────────────────────────────────────────
         $driverData = [
-            ['Andri Kurniawan',  'driver1@kencanalima.id', 'D 1234 KL', -6.9050, 107.6100],
-            ['Bowo Susanto',     'driver2@kencanalima.id', 'D 5678 KL', -6.9200, 107.6350],
-            ['Catur Wicaksono',  'driver3@kencanalima.id', 'D 9012 KL', -6.9400, 107.6500],
-            ['Dedi Prasetyo',    'driver4@kencanalima.id', 'D 3456 KL', -6.8950, 107.6200],
-            ['Eka Saputra',      'driver5@kencanalima.id', 'D 7890 KL', -6.9100, 107.6550],
+            ['Andri Kurniawan',  'driver1@ombar.id', 'D 1234 KL', -6.9050, 107.6100],
+            ['Bowo Susanto',     'driver2@ombar.id', 'D 5678 KL', -6.9200, 107.6350],
+            ['Catur Wicaksono',  'driver3@ombar.id', 'D 9012 KL', -6.9400, 107.6500],
+            ['Dedi Prasetyo',    'driver4@ombar.id', 'D 3456 KL', -6.8950, 107.6200],
+            ['Eka Saputra',      'driver5@ombar.id', 'D 7890 KL', -6.9100, 107.6550],
         ];
 
         $drivers = [];
@@ -284,8 +284,8 @@ class DemoSeeder extends Seeder
         $this->command->info('=== DEMO ACCOUNT READY ===');
         $this->command->info('Merchant : Kencana Lima');
         $this->command->info('Owner    : owner@ombar.id / password');
-        $this->command->info('Dispatch : dispatcher@kencanalima.id / password');
-        $this->command->info('Drivers  : driver1-5@kencanalima.id / password');
+        $this->command->info('Dispatch : dispatcher@ombar.id / password');
+        $this->command->info('Drivers  : driver1-5@ombar.id / password');
         $this->command->info('Total orders: ' . ($orderCount + 35));
     }
 }
