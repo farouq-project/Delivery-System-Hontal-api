@@ -80,22 +80,21 @@ class DemoSeeder extends Seeder
     {
         // ── Wipe any previous demo run (makes seeder re-runnable) ─────────────
         $this->command->info('Cleaning up any previous demo data...');
-        foreach (['ombar-distribusi', 'kencana-lima'] as $slug) {
-            $prev = Merchant::withoutGlobalScopes()
-                ->where('slug', $slug)
-                ->where('email', 'owner@ombar.id')
-                ->first();
-            if ($prev) {
-                DeliveryOrder::withoutGlobalScopes()->where('merchant_id', $prev->id)->forceDelete();
-                Customer::withoutGlobalScopes()->where('merchant_id', $prev->id)->forceDelete();
-                Driver::withoutGlobalScopes()->where('merchant_id', $prev->id)->forceDelete();
-                User::where('merchant_id', $prev->id)->forceDelete();
-                MerchantSetting::where('merchant_id', $prev->id)->delete();
-                VipConfig::where('merchant_id', $prev->id)->delete();
-                MerchantFeature::where('merchant_id', $prev->id)->delete();
-                $prev->delete();
-                $this->command->info("Removed previous demo merchant (slug: {$slug}).");
-            }
+        $prevMerchants = Merchant::withoutGlobalScopes()
+            ->withTrashed()
+            ->whereIn('slug', ['ombar-distribusi', 'kencana-lima'])
+            ->orWhereIn('email', ['info@ombar.id', 'owner@ombar.id'])
+            ->get();
+        foreach ($prevMerchants as $prev) {
+            DeliveryOrder::withoutGlobalScopes()->where('merchant_id', $prev->id)->forceDelete();
+            Customer::withoutGlobalScopes()->where('merchant_id', $prev->id)->forceDelete();
+            Driver::withoutGlobalScopes()->where('merchant_id', $prev->id)->forceDelete();
+            User::where('merchant_id', $prev->id)->forceDelete();
+            MerchantSetting::where('merchant_id', $prev->id)->delete();
+            VipConfig::where('merchant_id', $prev->id)->delete();
+            MerchantFeature::where('merchant_id', $prev->id)->delete();
+            $prev->forceDelete();
+            $this->command->info("Removed previous demo merchant: {$prev->slug}.");
         }
 
         $this->command->info('Creating Ombar Distribusi demo merchant...');
@@ -107,7 +106,7 @@ class DemoSeeder extends Seeder
             'slug'         => 'ombar-distribusi',
             'address'      => 'Jl. Soekarno Hatta No. 88, Bandung',
             'phone'        => '022-7654321',
-            'email'        => 'owner@ombar.id',
+            'email'        => 'info@ombar.id',
             'timezone'     => 'Asia/Jakarta',
         ]);
 
