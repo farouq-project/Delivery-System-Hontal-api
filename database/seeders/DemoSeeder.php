@@ -78,13 +78,33 @@ class DemoSeeder extends Seeder
 
     public function run(): void
     {
-        $this->command->info('Creating Kencana Lima demo merchant...');
+        // ── Wipe any previous demo run (makes seeder re-runnable) ─────────────
+        $this->command->info('Cleaning up any previous demo data...');
+        foreach (['ombar-distribusi', 'kencana-lima'] as $slug) {
+            $prev = Merchant::withoutGlobalScopes()
+                ->where('slug', $slug)
+                ->where('email', 'owner@ombar.id')
+                ->first();
+            if ($prev) {
+                DeliveryOrder::withoutGlobalScopes()->where('merchant_id', $prev->id)->forceDelete();
+                Customer::withoutGlobalScopes()->where('merchant_id', $prev->id)->forceDelete();
+                Driver::withoutGlobalScopes()->where('merchant_id', $prev->id)->forceDelete();
+                User::where('merchant_id', $prev->id)->forceDelete();
+                MerchantSetting::where('merchant_id', $prev->id)->delete();
+                VipConfig::where('merchant_id', $prev->id)->delete();
+                MerchantFeature::where('merchant_id', $prev->id)->delete();
+                $prev->delete();
+                $this->command->info("Removed previous demo merchant (slug: {$slug}).");
+            }
+        }
+
+        $this->command->info('Creating Ombar Distribusi demo merchant...');
 
         // ── Merchant ──────────────────────────────────────────────────────────
         $merchant = Merchant::create([
             'ulid'         => Str::ulid(),
-            'company_name' => 'Kencana Lima',
-            'slug'         => 'kencana-lima',
+            'company_name' => 'Ombar Distribusi',
+            'slug'         => 'ombar-distribusi',
             'address'      => 'Jl. Soekarno Hatta No. 88, Bandung',
             'phone'        => '022-7654321',
             'email'        => 'owner@ombar.id',
@@ -282,7 +302,7 @@ class DemoSeeder extends Seeder
         $this->command->info('35 pending orders for today created.');
         $this->command->info('');
         $this->command->info('=== DEMO ACCOUNT READY ===');
-        $this->command->info('Merchant : Kencana Lima');
+        $this->command->info('Merchant : Ombar Distribusi');
         $this->command->info('Owner    : owner@ombar.id / password');
         $this->command->info('Dispatch : dispatcher@ombar.id / password');
         $this->command->info('Drivers  : driver1-5@ombar.id / password');
