@@ -203,7 +203,7 @@ class DemoSeeder extends Seeder
             if ($date->isSunday()) continue;
 
             // Growth trend: more orders as time approaches today
-            $baseOrders = 20 + (int)(($180 - $daysAgo) / 180 * 25);
+            $baseOrders = 20 + (int)((180 - $daysAgo) / 180 * 25);
             $dailyCount = rand($baseOrders, $baseOrders + 8);
 
             for ($j = 0; $j < $dailyCount; $j++) {
