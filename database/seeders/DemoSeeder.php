@@ -112,7 +112,7 @@ class DemoSeeder extends Seeder
         // Enable BI features
         foreach (['executive_dashboard', 'merchant_platform', 'bi_module'] as $feat) {
             MerchantFeature::firstOrCreate(
-                ['merchant_id' => $merchant->id, 'feature_key' => $feat],
+                ['merchant_id' => $merchant->id, 'feature' => $feat],
                 ['is_enabled' => true]
             );
         }
