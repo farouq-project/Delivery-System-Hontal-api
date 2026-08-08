@@ -74,7 +74,7 @@ class DemoSeeder extends Seeder
         'Susu Kambing 1L'      => 32000,
     ];
 
-    private array $paymentMethods = ['transfer', 'cash', 'transfer', 'transfer', 'cod'];
+    private array $paymentMethods = ['transfer', 'cash', 'transfer', 'qris', 'bayar_di_toko'];
 
     public function run(): void
     {
