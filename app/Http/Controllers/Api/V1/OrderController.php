@@ -129,6 +129,11 @@ class OrderController extends Controller
             }
         }
 
+        // Default delivery date to today in merchant's local timezone when not specified
+        if (empty($data['requested_delivery_date'])) {
+            $data['requested_delivery_date'] = today()->toDateString();
+        }
+
         $today    = now()->format('Ymd');
         $cacheKey = "order_seq:{$merchantId}:{$today}";
 
