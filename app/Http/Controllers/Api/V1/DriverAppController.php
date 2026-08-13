@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\DeliveryOrder;
 use App\Models\Driver;
 use App\Models\DriverLocation;
+use App\Models\MerchantSetting;
 use App\Models\ProofOfDelivery;
 use App\Models\RouteStop;
 use App\Services\OrderService;
@@ -40,25 +41,28 @@ class DriverAppController extends Controller
 
     public function today(Request $request)
     {
-        $driver    = $this->getDriver($request);
-        $canLogout = (bool) ($request->user()->can_logout ?? true);
+        $driver      = $this->getDriver($request);
+        $canLogout   = (bool) ($request->user()->can_logout ?? true);
+        $merchantId  = $request->user()->merchant_id;
+        $klotterSize = MerchantSetting::where('merchant_id', $merchantId)->value('klotter_size') ?? 7;
 
         $assignment = $driver->routeAssignments()
             ->whereHas('route', fn($q) => $q->where('route_date', today()))
             ->with(['stops' => function ($q) {
-                $q->with('order:id,order_number,customer_name,customer_phone,delivery_address,delivery_latitude,delivery_longitude,delivery_notes,product_name,order_value,status,requested_delivery_start,requested_delivery_end')
+                $q->with('order:id,order_number,customer_name,customer_phone,delivery_address,delivery_latitude,delivery_longitude,delivery_notes,product_name,order_value,payment_method,assigned_at,status,requested_delivery_start,requested_delivery_end')
                   ->orderByDesc('total_score')
                   ->orderBy('stop_sequence');
             }])
             ->first();
 
         if (!$assignment) {
-            return response()->json(['data' => ['stops' => [], 'total_stops' => 0, 'completed_stops' => 0, 'can_logout' => $canLogout]]);
+            return response()->json(['data' => ['stops' => [], 'total_stops' => 0, 'completed_stops' => 0, 'can_logout' => $canLogout, 'klotter_size' => $klotterSize]]);
         }
 
         return response()->json([
             'data' => [
                 'can_logout'          => $canLogout,
+                'klotter_size'        => $klotterSize,
                 'route_assignment_id' => $assignment->id,
                 'route_date'          => today()->toDateString(),
                 'total_stops'         => $assignment->total_stops,
