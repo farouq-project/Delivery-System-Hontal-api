@@ -27,6 +27,7 @@ class DeliveryOrder extends Model
         'route_sequence', 'estimated_distance_m', 'estimated_duration_min', 'actual_distance_m',
         'import_batch_id', 'external_order_id', 'created_by', 'updated_by',
         'cashier_name', 'payment_method',
+        'delivery_type', 'depot_id', 'batch_id',
     ];
 
     protected $casts = [
@@ -74,6 +75,24 @@ class DeliveryOrder extends Model
     {
         return $this->hasOne(RouteStop::class, 'order_id');
     }
+
+    public function depot()
+    {
+        return $this->belongsTo(Depot::class);
+    }
+
+    public function batch()
+    {
+        return $this->belongsTo(HontalKirimBatch::class, 'batch_id');
+    }
+
+    public function pooledStop()
+    {
+        return $this->hasOne(PooledStop::class, 'order_id');
+    }
+
+    public function isKirim(): bool     { return $this->delivery_type === 'hontal_kirim'; }
+    public function isSistem(): bool    { return $this->delivery_type === 'merchant_managed'; }
 
     public function scopeForMerchant($query, int $merchantId)
     {

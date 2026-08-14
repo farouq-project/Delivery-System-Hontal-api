@@ -9,3 +9,6 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('customers:recalculate-health')->dailyAt('03:00');
+
+// Close Kirim batch windows at :00 and :30 every hour
+Schedule::command('kirim:close-batch')->everyThirtyMinutes();

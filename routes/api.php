@@ -31,6 +31,8 @@ use App\Http\Controllers\Api\V1\Admin\TrialMerchantController;
 use App\Http\Controllers\Api\V1\MerchantSubscriptionController;
 use App\Http\Controllers\Api\Public\PublicController;
 use App\Http\Controllers\Api\V1\TrackingController;
+use App\Http\Controllers\Api\V1\Kirim\DepotController;
+use App\Http\Controllers\Api\V1\Kirim\KirimOrderController;
 use Illuminate\Support\Facades\Route;
 
 // ─── PUBLIC ROUTES (no auth) ──────────────────────────────────────────────────
@@ -84,7 +86,7 @@ Route::prefix('v1')->group(function () {
     // ─── DISPATCHER / OWNER ROUTES ────────────────────────────────────
     // kasir and developer are included so they can access operational endpoints.
     // Fine-grained role checks (owner-only actions) are enforced inside each controller.
-    Route::middleware(['auth:sanctum', 'role:super_admin,merchant_owner,dispatcher,kasir,developer'])->group(function () {
+    Route::middleware(['auth:sanctum', 'role:super_admin,merchant_owner,dispatcher,kasir,developer,merchant_ops'])->group(function () {
 
         // Feature flags for current merchant
         Route::get('features', [FeaturesController::class, 'index']);
@@ -358,6 +360,30 @@ Route::prefix('v1')->group(function () {
         Route::delete('crm-templates/{crmMessageTemplate}',      [CrmMessageTemplateController::class, 'destroy']);
         Route::post('crm-templates/{crmMessageTemplate}/preview', [CrmMessageTemplateController::class, 'preview']);
     });
+
+    // ─── HONTAL KIRIM — MERCHANT-FACING ──────────────────────────────
+    // Accessible to Kirim merchants: owner, ops, and platform roles.
+    // Dispatcher (Sistem role) and kasir are excluded — they use different flows.
+    Route::middleware(['auth:sanctum', 'role:super_admin,developer,merchant_owner,merchant_ops'])
+        ->prefix('kirim')
+        ->group(function () {
+            // Depot management (pickup points for Kirim orders)
+            Route::apiResource('depots', DepotController::class);
+
+            // Kirim order creation and list (merchant sees only their own orders via MerchantScope)
+            Route::get('orders',  [KirimOrderController::class, 'index']);
+            Route::post('orders', [KirimOrderController::class, 'store']);
+        });
+
+    // ─── HONTAL KIRIM — DISPATCHER CONSOLE (Phase 2) ─────────────────
+    // Cross-tenant: merchant_id = NULL users bypass MerchantScope.
+    // Layer 2 (controller-level) scopes every query to batch-context orders only.
+    Route::middleware(['auth:sanctum', 'role:hontal_dispatcher,super_admin,developer'])
+        ->prefix('kirim/dispatch')
+        ->group(function () {
+            // Phase 2 endpoints — batch queue, route builder, pooled live map
+            // Currently empty
+        });
 
     // ─── DRIVER APP ROUTES ────────────────────────────────────────────
     Route::middleware(['auth:sanctum', 'role:driver'])->prefix('driver')->group(function () {

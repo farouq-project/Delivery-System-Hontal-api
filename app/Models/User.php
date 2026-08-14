@@ -40,9 +40,18 @@ class User extends Authenticatable
         return $this->hasOne(Driver::class);
     }
 
-    public function isSuperAdmin(): bool { return $this->role === 'super_admin'; }
-    public function isDeveloper(): bool  { return $this->role === 'developer'; }
-    public function isOwner(): bool      { return $this->role === 'merchant_owner'; }
-    public function isDispatcher(): bool { return $this->role === 'dispatcher'; }
-    public function isDriver(): bool     { return $this->role === 'driver'; }
+    public function isSuperAdmin(): bool         { return $this->role === 'super_admin'; }
+    public function isDeveloper(): bool          { return $this->role === 'developer'; }
+    public function isOwner(): bool              { return $this->role === 'merchant_owner'; }
+    public function isDispatcher(): bool         { return $this->role === 'dispatcher'; }
+    public function isDriver(): bool             { return $this->role === 'driver'; }
+    public function isMerchantOps(): bool        { return $this->role === 'merchant_ops'; }
+    public function isHontalDispatcher(): bool   { return $this->role === 'hontal_dispatcher'; }
+    public function isKasir(): bool              { return $this->role === 'kasir'; }
+
+    // Any role that can operate the dispatch console cross-tenant
+    public function canDispatchKirim(): bool
+    {
+        return in_array($this->role, ['hontal_dispatcher', 'super_admin', 'developer']);
+    }
 }

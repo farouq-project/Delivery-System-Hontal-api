@@ -15,7 +15,7 @@ class TrackingController extends Controller
     public function show(string $token): JsonResponse
     {
         $order = DeliveryOrder::withoutGlobalScope(MerchantScope::class)
-            ->with(['merchant', 'driver'])
+            ->with(['merchant', 'driver', 'depot'])
             ->where('ulid', $token)
             ->first();
 
@@ -40,10 +40,24 @@ class TrackingController extends Controller
         // Backend uses 'in_transit'; tracking page expects 'in_progress'
         $status = $order->status === 'in_transit' ? 'in_progress' : $order->status;
 
-        // Driver name only visible when merchant has driver_location_visible enabled (or not configured)
+        // Driver name + location (only when merchant has driver_location_visible enabled)
         $driverName = null;
+        $driverLat  = null;
+        $driverLng  = null;
         if ($order->driver && ($settings === null || $settings->driver_location_visible)) {
             $driverName = $order->driver->driver_name;
+            $driverLat  = $order->driver->current_lat;
+            $driverLng  = $order->driver->current_lng;
+        }
+
+        // Depot info — only for Kirim orders; used by the tracking map to show the pickup origin
+        $depotName = null;
+        $depotLat  = null;
+        $depotLng  = null;
+        if ($order->delivery_type === 'hontal_kirim' && $order->depot) {
+            $depotName = $order->depot->name;
+            $depotLat  = $order->depot->latitude;
+            $depotLng  = $order->depot->longitude;
         }
 
         // ── Part 6: Predicted delivery time ──────────────────────────────────
@@ -53,17 +67,27 @@ class TrackingController extends Controller
 
         return response()->json([
             'data' => [
-                'order_number'           => $order->order_number,
-                'customer_name'          => $order->customer_name,
-                'status'                 => $status,
-                'merchant_name'          => $order->merchant?->company_name,
-                'estimated_arrival'      => $order->requested_delivery_date?->format('Y-m-d'),
-                'driver_name'            => $driverName,
-                'notes'                  => $order->delivery_notes,
-                'predicted_delivery_time'=> $predictedAt
+                'order_number'            => $order->order_number,
+                'customer_name'           => $order->customer_name,
+                'status'                  => $status,
+                'merchant_name'           => $order->merchant?->company_name,
+                'estimated_arrival'       => $order->requested_delivery_date?->format('Y-m-d'),
+                'driver_name'             => $driverName,
+                'notes'                   => $order->delivery_notes,
+                'predicted_delivery_time' => $predictedAt
                     ? $predictedAt->setTimezone($timezone)->toIso8601String()
                     : null,
-                'prediction_source'      => $predictionSource,
+                'prediction_source'       => $predictionSource,
+                // Map coordinates
+                'delivery_latitude'       => $order->delivery_latitude,
+                'delivery_longitude'      => $order->delivery_longitude,
+                'driver_lat'              => $driverLat,
+                'driver_lng'              => $driverLng,
+                // Kirim-specific: pickup depot origin
+                'is_kirim'                => $order->delivery_type === 'hontal_kirim',
+                'depot_name'              => $depotName,
+                'depot_latitude'          => $depotLat,
+                'depot_longitude'         => $depotLng,
             ],
         ]);
     }
