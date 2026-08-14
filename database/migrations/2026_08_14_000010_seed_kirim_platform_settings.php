@@ -10,8 +10,8 @@ return new class extends Migration
     {
         $now = now();
 
-        // ── Platform settings ──────────────────────────────────────────────────
-        DB::table('platform_settings')->insert([
+        // ── Platform settings (insertOrIgnore: safe to re-run if migration partially failed) ─
+        DB::table('platform_settings')->insertOrIgnore([
             ['key' => 'kirim_service_radius_km',       'value' => '25',    'type' => 'integer', 'description' => 'Haversine radius from Bandung center beyond which Kirim orders are rejected.',  'created_at' => $now, 'updated_at' => $now],
             ['key' => 'kirim_delivery_fee_idr',         'value' => '10000', 'type' => 'integer', 'description' => 'Flat Kirim delivery fee per order in IDR.',                                     'created_at' => $now, 'updated_at' => $now],
             ['key' => 'kirim_low_balance_threshold_idr','value' => '50000', 'type' => 'integer', 'description' => 'Default low-balance alert threshold per merchant credit account (5 deliveries).','created_at' => $now, 'updated_at' => $now],
@@ -34,20 +34,24 @@ return new class extends Migration
                 'updated_at'   => $now,
             ]);
 
-            DB::table('merchant_settings')->insert([
-                'merchant_id'            => $merchantId,
-                'routing_algorithm'      => 'scored',
-                'auto_geocode_enabled'   => true,
-                'max_stops_per_driver'   => 30,
-                'working_hours_start'    => '07:00:00',
-                'working_hours_end'      => '20:00:00',
-                'gps_ping_interval_sec'  => 30,
-                'gps_history_days'       => 30,
-                'public_tracking_enabled'=> true,
-                'driver_location_visible'=> true,
-                'created_at'             => $now,
-                'updated_at'             => $now,
-            ]);
+            // Insert settings only if not already present (guards against partial-run retry)
+            $hasSettings = DB::table('merchant_settings')->where('merchant_id', $merchantId)->exists();
+            if (! $hasSettings) {
+                DB::table('merchant_settings')->insert([
+                    'merchant_id'            => $merchantId,
+                    'routing_algorithm'      => 'balanced', // 'scored' removed from ENUM in 2026_07_14_200001
+                    'auto_geocode_enabled'   => true,
+                    'max_stops_per_driver'   => 30,
+                    'working_hours_start'    => '07:00:00',
+                    'working_hours_end'      => '20:00:00',
+                    'gps_ping_interval_sec'  => 30,
+                    'gps_history_days'       => 30,
+                    'public_tracking_enabled'=> true,
+                    'driver_location_visible'=> true,
+                    'created_at'             => $now,
+                    'updated_at'             => $now,
+                ]);
+            }
         }
 
         DB::table('platform_settings')
