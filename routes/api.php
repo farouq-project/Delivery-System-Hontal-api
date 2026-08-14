@@ -207,7 +207,7 @@ Route::prefix('v1')->group(function () {
     });
 
     // ─── CUSTOMER DOMAIN (Phase 2A — feature-gated per merchant) ────
-    Route::middleware(['auth:sanctum', 'role:super_admin,merchant_owner,dispatcher,kasir,developer'])
+    Route::middleware(['auth:sanctum', 'role:super_admin,merchant_owner,dispatcher,kasir,developer,merchant_ops'])
         ->prefix('customer-domain')
         ->group(function () {
             // Per-customer: profile, timeline, metrics
@@ -226,7 +226,7 @@ Route::prefix('v1')->group(function () {
         });
 
     // ─── BUSINESS INTELLIGENCE (Phase 4.1 — role-gated inside controller) ───
-    Route::middleware(['auth:sanctum', 'role:super_admin,merchant_owner,developer'])
+    Route::middleware(['auth:sanctum', 'role:super_admin,merchant_owner,developer,merchant_ops'])
         ->prefix('bi')
         ->group(function () {
             // Existing BI endpoints — DO NOT MODIFY (backward compatibility)
