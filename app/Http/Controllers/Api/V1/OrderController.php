@@ -11,6 +11,8 @@ use App\Models\MerchantCashier;
 use App\Models\MerchantPaymentMethod;
 use App\Models\MerchantSetting;
 use App\Models\ProductCatalog;
+use App\Models\PooledRoute;
+use App\Models\PooledStop;
 use App\Models\Route;
 use App\Models\RouteAssignment;
 use App\Models\RouteStop;
@@ -487,11 +489,56 @@ class OrderController extends Controller
             'longitude' => 'nullable|numeric',
         ]);
 
-        $this->orderService->transition($order, $request->status, $request->user(), [
+        $context = [
             'reason'    => $request->reason,
             'latitude'  => $request->latitude,
             'longitude' => $request->longitude,
-        ]);
+        ];
+
+        // When resetting to pending, clean up all route assignment records
+        if ($request->status === 'pending') {
+            $context['driver_id'] = null;
+
+            DB::transaction(function () use ($order) {
+                // Sistem layer: RouteStop (sistem merchant dispatch)
+                $routeStop = RouteStop::where('order_id', $order->id)->first();
+                if ($routeStop) {
+                    $route = $routeStop->route;
+                    RouteStop::where('route_assignment_id', $routeStop->route_assignment_id)
+                        ->where('stop_sequence', '>', $routeStop->stop_sequence)
+                        ->decrement('stop_sequence');
+                    $routeStop->delete();
+                    $route?->decrement('total_stops');
+                }
+
+                // Kirim layer: PooledStop (Hontal Kirim pooled dispatch)
+                $pooledStop = PooledStop::where('order_id', $order->id)->first();
+                if ($pooledStop) {
+                    $pooledRoute = $pooledStop->route;
+
+                    // Remove from pickup pivot (if this order was part of a pickup group)
+                    DB::table('pooled_stop_orders')->where('order_id', $order->id)->delete();
+
+                    // Re-sequence remaining stops in this route after the deleted one
+                    PooledStop::where('pooled_route_id', $pooledStop->pooled_route_id)
+                        ->where('stop_sequence', '>', $pooledStop->stop_sequence)
+                        ->decrement('stop_sequence');
+
+                    $pooledStop->delete();
+
+                    if ($pooledRoute) {
+                        $remaining = $pooledRoute->stops()->count();
+                        if ($remaining === 0) {
+                            $pooledRoute->update(['status' => 'cancelled', 'total_stops' => 0]);
+                        } else {
+                            $pooledRoute->update(['total_stops' => $remaining]);
+                        }
+                    }
+                }
+            });
+        }
+
+        $this->orderService->transition($order, $request->status, $request->user(), $context);
 
         return response()->json(['data' => $order->fresh()]);
     }
