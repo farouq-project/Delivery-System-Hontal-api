@@ -8,8 +8,11 @@ use App\Models\DeliveryOrder;
 use App\Models\Driver;
 use App\Models\DriverLocation;
 use App\Models\MerchantSetting;
+use App\Models\PooledRoute;
+use App\Models\PooledStop;
 use App\Models\ProofOfDelivery;
 use App\Models\RouteStop;
+use App\Models\Scopes\MerchantScope;
 use App\Services\OrderService;
 use Illuminate\Http\Request;
 
@@ -59,6 +62,45 @@ class DriverAppController extends Controller
             return response()->json(['data' => ['stops' => [], 'total_stops' => 0, 'completed_stops' => 0, 'can_logout' => $canLogout, 'klotter_size' => $klotterSize]]);
         }
 
+        // Pooled route (Kirim) — separate from Sistem klotter stops
+        $pooledRoute = PooledRoute::withoutGlobalScope(MerchantScope::class)
+            ->where('driver_id', $driver->id)
+            ->whereIn('status', ['queued', 'active'])
+            ->whereHas('batch', fn($q) => $q->whereDate('window_start', today()))
+            ->with(['stops' => function ($q) {
+                $q->with([
+                    'order:id,order_number,customer_name,customer_phone,delivery_address,delivery_latitude,delivery_longitude,delivery_notes,product_name,order_value,payment_method,status',
+                    'depot:id,name,address,latitude,longitude,contact_name,contact_phone',
+                    'pickupOrders:id,order_number,customer_name,product_name',
+                ])->orderBy('stop_sequence');
+            }, 'batch:id,window_start,window_end'])
+            ->latest('assigned_at')
+            ->first();
+
+        $pooledRouteData = null;
+        if ($pooledRoute) {
+            $pooledRouteData = [
+                'route_id'       => $pooledRoute->id,
+                'status'         => $pooledRoute->status,
+                'total_stops'    => $pooledRoute->total_stops,
+                'completed_stops'=> $pooledRoute->completed_stops,
+                'batch_window'   => $pooledRoute->batch?->window_start?->toISOString(),
+                'stops'          => $pooledRoute->stops->map(fn($s) => [
+                    'stop_id'         => $s->id,
+                    'stop_sequence'   => $s->stop_sequence,
+                    'stop_type'       => $s->stop_type,
+                    'status'          => $s->status,
+                    'latitude'        => $s->latitude,
+                    'longitude'       => $s->longitude,
+                    'contact_name'    => $s->contact_name,
+                    'contact_phone'   => $s->contact_phone,
+                    'depot'           => $s->depot,
+                    'order'           => $s->order,
+                    'pickup_orders'   => $s->stop_type === 'pickup' ? $s->pickupOrders : null,
+                ]),
+            ];
+        }
+
         return response()->json([
             'data' => [
                 'can_logout'          => $canLogout,
@@ -77,6 +119,7 @@ class DriverAppController extends Controller
                     'estimated_arrival' => $s->estimated_arrival?->toISOString(),
                     'order'             => $s->order,
                 ]),
+                'pooled_route'        => $pooledRouteData,
             ],
         ]);
     }
@@ -220,6 +263,66 @@ class DriverAppController extends Controller
         }
 
         return response()->json(['message' => 'Failure reported.']);
+    }
+
+    public function completePooledStop(Request $request, int $stopId)
+    {
+        $driver = $this->getDriver($request);
+        $stop   = PooledStop::with('route')->findOrFail($stopId);
+
+        if ($stop->route->driver_id !== $driver->id) {
+            abort(403, 'This stop is not assigned to you.');
+        }
+        if ($stop->status !== 'pending') {
+            return response()->json(['message' => 'Stop already completed.'], 422);
+        }
+
+        $stop->update(['status' => 'completed', 'actual_arrival' => now()]);
+
+        // For dropoff stops: mark the linked order as delivered
+        if ($stop->isDropoff() && $stop->order_id) {
+            $order = DeliveryOrder::withoutGlobalScope(MerchantScope::class)->find($stop->order_id);
+            if ($order) {
+                $this->orderService->transition($order, 'delivered', $request->user(), [
+                    'latitude'  => $request->latitude,
+                    'longitude' => $request->longitude,
+                ]);
+            }
+        }
+
+        $route = $stop->route;
+        $route->increment('completed_stops');
+
+        // Auto-complete route when all stops done
+        $pending = PooledStop::where('pooled_route_id', $route->id)->where('status', 'pending')->count();
+        if ($pending === 0) {
+            $route->update(['status' => 'completed', 'completed_at' => now()]);
+        }
+
+        return response()->json(['message' => 'Stop completed.']);
+    }
+
+    public function failPooledStop(Request $request, int $stopId)
+    {
+        $driver = $this->getDriver($request);
+        $stop   = PooledStop::with('route')->findOrFail($stopId);
+
+        if ($stop->route->driver_id !== $driver->id) {
+            abort(403, 'This stop is not assigned to you.');
+        }
+
+        $request->validate(['reason' => 'required|string|max:500']);
+
+        $stop->update(['status' => 'failed', 'actual_arrival' => now(), 'notes' => $request->reason]);
+
+        if ($stop->isDropoff() && $stop->order_id) {
+            $order = DeliveryOrder::withoutGlobalScope(MerchantScope::class)->find($stop->order_id);
+            if ($order) {
+                $this->orderService->transition($order, 'failed', $request->user(), ['reason' => $request->reason]);
+            }
+        }
+
+        return response()->json(['message' => 'Stop marked as failed.']);
     }
 
     public function history(Request $request)

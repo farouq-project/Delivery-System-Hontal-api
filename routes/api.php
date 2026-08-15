@@ -33,6 +33,8 @@ use App\Http\Controllers\Api\Public\PublicController;
 use App\Http\Controllers\Api\V1\TrackingController;
 use App\Http\Controllers\Api\V1\Kirim\DepotController;
 use App\Http\Controllers\Api\V1\Kirim\KirimOrderController;
+use App\Http\Controllers\Api\V1\Kirim\KirimDispatchController;
+use App\Http\Controllers\Api\V1\Kirim\KirimCreditController;
 use Illuminate\Support\Facades\Route;
 
 // ─── PUBLIC ROUTES (no auth) ──────────────────────────────────────────────────
@@ -373,16 +375,30 @@ Route::prefix('v1')->group(function () {
             // Kirim order creation and list (merchant sees only their own orders via MerchantScope)
             Route::get('orders',  [KirimOrderController::class, 'index']);
             Route::post('orders', [KirimOrderController::class, 'store']);
+
+            // Credit balance + ledger (merchant-facing)
+            Route::get('balance',      [KirimCreditController::class, 'balance']);
+            Route::get('transactions', [KirimCreditController::class, 'transactions']);
         });
 
-    // ─── HONTAL KIRIM — DISPATCHER CONSOLE (Phase 2) ─────────────────
+    // ─── HONTAL KIRIM — DISPATCHER CONSOLE ───────────────────────────
     // Cross-tenant: merchant_id = NULL users bypass MerchantScope.
     // Layer 2 (controller-level) scopes every query to batch-context orders only.
     Route::middleware(['auth:sanctum', 'role:hontal_dispatcher,super_admin,developer'])
         ->prefix('kirim/dispatch')
         ->group(function () {
-            // Phase 2 endpoints — batch queue, route builder, pooled live map
-            // Currently empty
+            // Batch queue
+            Route::get('batches',                      [KirimDispatchController::class, 'batches']);
+            Route::get('batches/{batch}/orders',       [KirimDispatchController::class, 'batchOrders']);
+            Route::post('batches/{batch}/close',       [KirimDispatchController::class, 'closeBatch']);
+
+            // Route builder
+            Route::get('drivers',                      [KirimDispatchController::class, 'drivers']);
+            Route::post('routes',                      [KirimDispatchController::class, 'createRoute']);
+            Route::get('routes/{route}',               [KirimDispatchController::class, 'routeDetail']);
+
+            // Admin top-up
+            Route::post('topup',                       [KirimDispatchController::class, 'topup']);
         });
 
     // ─── DRIVER APP ROUTES ────────────────────────────────────────────
@@ -391,8 +407,11 @@ Route::prefix('v1')->group(function () {
         Route::get('today',                     [DriverAppController::class, 'today']);
         Route::patch('location',                [DriverAppController::class, 'updateLocation']);
         Route::patch('status',                  [DriverAppController::class, 'updateStatus']);
-        Route::post('stops/{stopId}/deliver',   [DriverAppController::class, 'deliver']);
-        Route::post('stops/{stopId}/fail',      [DriverAppController::class, 'fail']);
-        Route::get('history',                   [DriverAppController::class, 'history']);
+        Route::post('stops/{stopId}/deliver',         [DriverAppController::class, 'deliver']);
+        Route::post('stops/{stopId}/fail',            [DriverAppController::class, 'fail']);
+        // Kirim pooled route stops
+        Route::post('pooled-stops/{stopId}/complete', [DriverAppController::class, 'completePooledStop']);
+        Route::post('pooled-stops/{stopId}/fail',     [DriverAppController::class, 'failPooledStop']);
+        Route::get('history',                         [DriverAppController::class, 'history']);
     });
 });
