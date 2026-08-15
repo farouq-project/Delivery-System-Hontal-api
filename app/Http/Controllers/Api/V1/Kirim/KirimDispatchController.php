@@ -485,6 +485,37 @@ class KirimDispatchController extends Controller
         return response()->json(['data' => $routes]);
     }
 
+    public function cancelRoute(Request $request, PooledRoute $route)
+    {
+        if (!in_array($route->status, ['queued', 'active'])) {
+            return response()->json(['message' => 'Only queued or active routes can be cancelled.'], 422);
+        }
+
+        DB::transaction(function () use ($route) {
+            // Collect stop IDs and all affected order IDs before deleting
+            $stopIds = $route->stops()->pluck('id');
+
+            $dropoffOrderIds = $route->stops()->whereNotNull('order_id')->pluck('order_id');
+            $pickupOrderIds  = DB::table('pooled_stop_orders')->whereIn('pooled_stop_id', $stopIds)->pluck('order_id');
+            $allOrderIds     = $dropoffOrderIds->merge($pickupOrderIds)->unique()->filter();
+
+            // Clean pivot first, then stops
+            DB::table('pooled_stop_orders')->whereIn('pooled_stop_id', $stopIds)->delete();
+            $route->stops()->delete();
+
+            // Return all orders to pending with no driver assignment
+            if ($allOrderIds->isNotEmpty()) {
+                DeliveryOrder::withoutGlobalScope(MerchantScope::class)
+                    ->whereIn('id', $allOrderIds)
+                    ->update(['status' => 'pending', 'driver_id' => null, 'assigned_at' => null]);
+            }
+
+            $route->update(['status' => 'cancelled', 'total_stops' => 0]);
+        });
+
+        return response()->json(['message' => 'Route reset successfully.']);
+    }
+
     // ── Top-up (admin) ────────────────────────────────────────────────────────
 
     public function topup(Request $request)
