@@ -11,12 +11,23 @@ use App\Models\PooledStop;
 use App\Models\DeliveryOrder;
 use App\Models\Scopes\MerchantScope;
 use App\Services\KirimBatchService;
+use App\Services\RoutingEngine\Clustering\GeographicClusterer;
+use App\Services\RoutingEngine\Optimization\NearestNeighborSolver;
+use App\Services\RoutingEngine\Optimization\TwoOptImprover;
+use App\Services\RoutingEngine\Preprocessing\HaversineMatrix;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class KirimDispatchController extends Controller
 {
-    public function __construct(private readonly KirimBatchService $batchService) {}
+    public function __construct(
+        private readonly KirimBatchService       $batchService,
+        private readonly HaversineMatrix         $haversineMatrix,
+        private readonly NearestNeighborSolver   $nnSolver,
+        private readonly TwoOptImprover          $twoOpt,
+        private readonly GeographicClusterer     $clusterer,
+    ) {}
 
     // ── Batch queue ───────────────────────────────────────────────────────────
 
@@ -152,10 +163,10 @@ class KirimDispatchController extends Controller
     public function createRoute(Request $request)
     {
         $data = $request->validate([
-            'driver_id'  => 'required|integer|exists:drivers,id',
-            'order_ids'  => 'required|array|min:1',
-            'order_ids.*'=> 'integer|exists:delivery_orders,id',
-            'notes'      => 'nullable|string|max:500',
+            'driver_id'   => 'required|integer|exists:drivers,id',
+            'order_ids'   => 'required|array|min:1',
+            'order_ids.*' => 'integer|exists:delivery_orders,id',
+            'notes'       => 'nullable|string|max:500',
         ]);
 
         $driver = Driver::withoutGlobalScope(MerchantScope::class)->findOrFail($data['driver_id']);
@@ -163,24 +174,34 @@ class KirimDispatchController extends Controller
         $orders = DeliveryOrder::withoutGlobalScope(MerchantScope::class)
             ->whereIn('id', $data['order_ids'])
             ->whereIn('status', ['pending', 'batched'])
+            ->with(['depot'])
             ->get();
 
         if ($orders->count() !== count($data['order_ids'])) {
             return response()->json(['message' => 'One or more orders are not available for assignment.'], 422);
         }
 
-        // Representative batch — use the first order's batch for bookkeeping (nullable)
         $batchId = $orders->first()?->batch_id;
 
-        // Build pickup stops (one per unique depot) + dropoff stops (one per order)
-        $depots = $orders->groupBy('depot_id');
+        // Optimize delivery stop sequence using NN + 2-opt before building the route
+        $locatedOrders      = $orders->filter(fn($o) => $o->delivery_latitude && $o->delivery_longitude);
+        $unlocatedOrders    = $orders->reject(fn($o) => $o->delivery_latitude && $o->delivery_longitude);
+        $orderedDeliveryIds = $this->optimizeDeliveries($orders, $locatedOrders);
 
+        foreach ($unlocatedOrders->pluck('id') as $id) {
+            if (!in_array($id, $orderedDeliveryIds)) {
+                $orderedDeliveryIds[] = $id;
+            }
+        }
+
+        $depotGroups = $orders->groupBy('depot_id');
+        $orderMap    = $orders->keyBy('id');
         $stops = [];
         $seq   = 1;
 
-        // Pickups first — one per unique depot (skip depot stop if no depot configured)
-        foreach ($depots as $depotId => $depotOrders) {
-            if (!$depotId) continue; // no depot = merchant-managed pickup, skip stop
+        // Pickup stops first — one per unique depot
+        foreach ($depotGroups as $depotId => $depotOrders) {
+            if (!$depotId) continue;
             $depot = $depotOrders->first()->depot;
             if (!$depot) continue;
             $stops[] = [
@@ -195,14 +216,16 @@ class KirimDispatchController extends Controller
             ];
         }
 
-        // Dropoffs — one per order
-        foreach ($orders as $order) {
+        // Delivery stops in NN+2-opt optimized sequence
+        foreach ($orderedDeliveryIds as $orderId) {
+            $order = $orderMap[$orderId] ?? null;
+            if (!$order) continue;
             $stops[] = [
-                'seq'      => $seq++,
-                'type'     => 'dropoff',
-                'order_id' => $order->id,
-                'latitude'    => $order->delivery_latitude,
-                'longitude'   => $order->delivery_longitude,
+                'seq'           => $seq++,
+                'type'          => 'dropoff',
+                'order_id'      => $order->id,
+                'latitude'      => $order->delivery_latitude,
+                'longitude'     => $order->delivery_longitude,
                 'contact_name'  => $order->customer_name,
                 'contact_phone' => $order->customer_phone,
             ];
@@ -233,7 +256,6 @@ class KirimDispatchController extends Controller
                     'status'          => 'pending',
                 ]);
 
-                // For pickup stops: link all pickup orders via the pivot table
                 if ($stop['type'] === 'pickup') {
                     DB::table('pooled_stop_orders')->insert(
                         collect($stop['order_ids'])->map(fn($oid) => [
@@ -244,7 +266,6 @@ class KirimDispatchController extends Controller
                 }
             }
 
-            // Mark orders as assigned
             DeliveryOrder::withoutGlobalScope(MerchantScope::class)
                 ->whereIn('id', $orders->pluck('id'))
                 ->update(['status' => 'assigned', 'assigned_at' => now()]);
@@ -255,6 +276,57 @@ class KirimDispatchController extends Controller
         return response()->json([
             'data' => $route->load(['stops', 'driver.user']),
         ], 201);
+    }
+
+    private function optimizeDeliveries(Collection $allOrders, Collection $locatedOrders): array
+    {
+        if ($locatedOrders->isEmpty()) {
+            return $allOrders->pluck('id')->toArray();
+        }
+
+        // Use the first depot with coordinates as origin; fall back to delivery centroid
+        $origin = null;
+        foreach ($allOrders->groupBy('depot_id') as $depotId => $depotOrders) {
+            if (!$depotId) continue;
+            $depot = $depotOrders->first()->depot;
+            if ($depot && $depot->latitude && $depot->longitude) {
+                $origin = ['lat' => (float) $depot->latitude, 'lng' => (float) $depot->longitude];
+                break;
+            }
+        }
+        if (!$origin) {
+            $origin = [
+                'lat' => (float) $locatedOrders->avg('delivery_latitude'),
+                'lng' => (float) $locatedOrders->avg('delivery_longitude'),
+            ];
+        }
+
+        // Build haversine matrix: index 0 = origin, 1..N = deliveries
+        $allPoints = [$origin];
+        $indexMap  = [];
+        $stopsData = [];
+
+        foreach ($locatedOrders as $order) {
+            $allPoints[]          = ['lat' => (float) $order->delivery_latitude, 'lng' => (float) $order->delivery_longitude];
+            $indexMap[$order->id] = count($allPoints) - 1;
+            $stopsData[$order->id] = [
+                'lat'         => (float) $order->delivery_latitude,
+                'lng'         => (float) $order->delivery_longitude,
+                'total_score' => 0,
+            ];
+        }
+
+        // Assign geographic cluster keys for group-affinity routing
+        $clusterMap = $this->clusterer->clusterStops($stopsData);
+        foreach ($stopsData as $id => $_) {
+            $stopsData[$id]['group_key'] = $clusterMap[$id] ?? null;
+        }
+
+        $matrix  = $this->haversineMatrix->build($allPoints);
+        $ordered = $this->nnSolver->solveGrouped($stopsData, $matrix, $indexMap);
+        $ordered = $this->twoOpt->improve($ordered, $matrix, $indexMap);
+
+        return $ordered;
     }
 
     public function routeDetail(PooledRoute $route)
@@ -345,9 +417,11 @@ class KirimDispatchController extends Controller
     {
         $routes = PooledRoute::whereIn('status', ['queued', 'active'])
             ->with([
+                'driver:id,merchant_id,driver_name,vehicle_plate,current_lat,current_lng,user_id',
                 'driver.user:id,name',
                 'batch:id,window_start,window_end,status',
-                'stops:id,pooled_route_id,stop_type,status',
+                'stops:id,pooled_route_id,stop_type,stop_sequence,status,order_id,depot_id,latitude,longitude,contact_name',
+                'stops.order:id,order_number,delivery_address',
             ])
             ->orderByDesc('assigned_at')
             ->limit(30)
@@ -355,8 +429,10 @@ class KirimDispatchController extends Controller
             ->map(fn($r) => [
                 'id'              => $r->id,
                 'status'          => $r->status,
-                'driver_name'     => $r->driver?->user?->name ?? '—',
+                'driver_name'     => $r->driver?->user?->name ?? $r->driver?->driver_name ?? '—',
                 'vehicle_plate'   => $r->driver?->vehicle_plate ?? '—',
+                'driver_lat'      => $r->driver?->current_lat ? (float) $r->driver->current_lat : null,
+                'driver_lng'      => $r->driver?->current_lng ? (float) $r->driver->current_lng : null,
                 'total_stops'     => $r->total_stops,
                 'completed_stops' => $r->completed_stops,
                 'assigned_at'     => $r->assigned_at,
@@ -367,6 +443,17 @@ class KirimDispatchController extends Controller
                     'window_end'   => $r->batch->window_end,
                 ] : null,
                 'stop_progress'   => $r->stops->groupBy('status')->map->count(),
+                'stops'           => $r->stops->sortBy('stop_sequence')->map(fn($s) => [
+                    'id'           => $s->id,
+                    'seq'          => $s->stop_sequence,
+                    'type'         => $s->stop_type,
+                    'status'       => $s->status,
+                    'lat'          => $s->latitude ? (float) $s->latitude : null,
+                    'lng'          => $s->longitude ? (float) $s->longitude : null,
+                    'label'        => $s->contact_name ?? '—',
+                    'order_number' => $s->order?->order_number,
+                    'address'      => $s->order?->delivery_address,
+                ])->values(),
             ]);
 
         return response()->json(['data' => $routes]);
