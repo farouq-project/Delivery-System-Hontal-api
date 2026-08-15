@@ -27,6 +27,7 @@ use App\Http\Controllers\Api\V1\Admin\PlatformDashboardController;
 use App\Http\Controllers\Api\V1\Admin\PlatformSettingsController;
 use App\Http\Controllers\Api\V1\Admin\SubscriptionController;
 use App\Http\Controllers\Api\V1\Admin\CreditPackController;
+use App\Http\Controllers\Api\V1\Admin\KirimAdminController;
 use App\Http\Controllers\Api\V1\Admin\TrialMerchantController;
 use App\Http\Controllers\Api\V1\MerchantSubscriptionController;
 use App\Http\Controllers\Api\Public\PublicController;
@@ -342,6 +343,17 @@ Route::prefix('v1')->group(function () {
 
         // Customer Intelligence — cross-merchant search (super_admin only)
         Route::get('customers/search', [AdminCustomerController::class, 'search']);
+
+        // Hontal Kirim admin — merchant management + internal team
+        Route::prefix('kirim')->group(function () {
+            Route::get('merchants',           [KirimAdminController::class, 'merchants']);
+            Route::post('merchants',          [KirimAdminController::class, 'createMerchant']);
+            Route::post('merchants/topup',    [KirimAdminController::class, 'topup']);
+            Route::get('team/dispatchers',    [KirimAdminController::class, 'dispatchers']);
+            Route::get('team/drivers',        [KirimAdminController::class, 'mitraDrivers']);
+            Route::post('team/dispatchers',   [KirimAdminController::class, 'createDispatcher']);
+            Route::post('team/drivers',       [KirimAdminController::class, 'createMitraDriver']);
+        });
 
         // CRM Prospects — literal routes must precede resource to avoid capture
         Route::get('crm/stats',            [CrmProspectController::class, 'stats']);

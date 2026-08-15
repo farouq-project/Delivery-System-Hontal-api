@@ -83,6 +83,11 @@ class MerchantController extends Controller
             )
             ->when($request->plan, fn($q, $pl) =>
                 $q->whereHas('subscription.plan', fn($q) => $q->where('slug', $pl))
+            )
+            ->when($request->merchant_type,
+                fn($q, $t) => $q->where('merchants.merchant_type', $t),
+                // By default exclude Hontal Internal from merchant lists
+                fn($q)     => $q->where(fn($q) => $q->where('merchants.merchant_type', '!=', 'internal')->orWhereNull('merchants.merchant_type'))
             );
 
         $sort = $request->sort ?? 'created';
