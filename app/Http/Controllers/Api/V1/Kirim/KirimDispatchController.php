@@ -123,16 +123,24 @@ class KirimDispatchController extends Controller
 
     public function drivers(Request $request)
     {
+        // Primary: use the configured internal merchant ID
         $internalMerchantId = (int) (PlatformSetting::where('key', 'hontal_internal_merchant_id')->value('value') ?: 0);
 
+        // Fallback: find any merchant with merchant_type = 'internal'
+        if (!$internalMerchantId) {
+            $internalMerchantId = \App\Models\Merchant::where('merchant_type', 'internal')->value('id') ?: 0;
+        }
+
+        // Show all active mitra drivers regardless of current status — dispatcher decides who to assign
         $drivers = Driver::withoutGlobalScope(MerchantScope::class)
             ->where('merchant_id', $internalMerchantId)
-            ->whereIn('status', ['available', 'delivering'])
+            ->where('is_active', true)
             ->with('user:id,name')
+            ->orderBy('driver_name')
             ->get()
             ->map(fn($d) => [
                 'id'            => $d->id,
-                'name'          => $d->user?->name ?? $d->name ?? '—',
+                'name'          => $d->user?->name ?? $d->driver_name ?? '—',
                 'vehicle_type'  => $d->vehicle_type,
                 'vehicle_plate' => $d->vehicle_plate,
                 'status'        => $d->status,
