@@ -184,9 +184,27 @@ class KirimDispatchController extends Controller
         $batchId = $orders->first()?->batch_id;
 
         // Optimize delivery stop sequence using NN + 2-opt before building the route
-        $locatedOrders      = $orders->filter(fn($o) => $o->delivery_latitude && $o->delivery_longitude);
-        $unlocatedOrders    = $orders->reject(fn($o) => $o->delivery_latitude && $o->delivery_longitude);
-        $orderedDeliveryIds = $this->optimizeDeliveries($orders, $locatedOrders);
+        $locatedOrders   = $orders->filter(fn($o) => $o->delivery_latitude && $o->delivery_longitude);
+        $unlocatedOrders = $orders->reject(fn($o) => $o->delivery_latitude && $o->delivery_longitude);
+
+        // Resolve routing origin: prefer merchant operational depot (Settings → Operational)
+        // over order-level depot_id, which is null for regular (non-Kirim-form) orders
+        $merchantDepot = null;
+        $kirimMerchants = \App\Models\Merchant::withoutGlobalScope(MerchantScope::class)
+            ->with('settings')
+            ->whereIn('id', $orders->pluck('merchant_id')->unique()->values())
+            ->get();
+        foreach ($kirimMerchants as $m) {
+            if ($m->settings?->depot_latitude && $m->settings?->depot_longitude) {
+                $merchantDepot = [
+                    'lat' => (float) $m->settings->depot_latitude,
+                    'lng' => (float) $m->settings->depot_longitude,
+                ];
+                break;
+            }
+        }
+
+        $orderedDeliveryIds = $this->optimizeDeliveries($orders, $locatedOrders, $merchantDepot);
 
         foreach ($unlocatedOrders->pluck('id') as $id) {
             if (!in_array($id, $orderedDeliveryIds)) {
@@ -278,20 +296,28 @@ class KirimDispatchController extends Controller
         ], 201);
     }
 
-    private function optimizeDeliveries(Collection $allOrders, Collection $locatedOrders): array
+    /**
+     * Origin priority:
+     *   1. $merchantDepot — merchant's operational depot from MerchantSetting (covers regular orders with no depot_id)
+     *   2. First order-level depot record with valid coordinates
+     *   3. Centroid of all located delivery points (last resort)
+     */
+    private function optimizeDeliveries(Collection $allOrders, Collection $locatedOrders, ?array $merchantDepot = null): array
     {
         if ($locatedOrders->isEmpty()) {
             return $allOrders->pluck('id')->toArray();
         }
 
-        // Use the first depot with coordinates as origin; fall back to delivery centroid
-        $origin = null;
-        foreach ($allOrders->groupBy('depot_id') as $depotId => $depotOrders) {
-            if (!$depotId) continue;
-            $depot = $depotOrders->first()->depot;
-            if ($depot && $depot->latitude && $depot->longitude) {
-                $origin = ['lat' => (float) $depot->latitude, 'lng' => (float) $depot->longitude];
-                break;
+        $origin = $merchantDepot;
+
+        if (!$origin) {
+            foreach ($allOrders->groupBy('depot_id') as $depotId => $depotOrders) {
+                if (!$depotId) continue;
+                $depot = $depotOrders->first()->depot;
+                if ($depot && $depot->latitude && $depot->longitude) {
+                    $origin = ['lat' => (float) $depot->latitude, 'lng' => (float) $depot->longitude];
+                    break;
+                }
             }
         }
         if (!$origin) {
