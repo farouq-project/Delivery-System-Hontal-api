@@ -352,9 +352,11 @@ Route::prefix('v1')->group(function () {
 
         // Hontal Kirim admin — merchant management + internal team
         Route::prefix('kirim')->group(function () {
-            Route::get('merchants',           [KirimAdminController::class, 'merchants']);
-            Route::post('merchants',          [KirimAdminController::class, 'createMerchant']);
-            Route::post('merchants/topup',    [KirimAdminController::class, 'topup']);
+            Route::get('merchants',                            [KirimAdminController::class, 'merchants']);
+            Route::post('merchants',                           [KirimAdminController::class, 'createMerchant']);
+            Route::post('merchants/topup',                     [KirimAdminController::class, 'topup']);
+            Route::get('merchants/{merchant}',                 [KirimAdminController::class, 'show']);
+            Route::post('merchants/{merchant}/convert-sistem', [KirimAdminController::class, 'convertToSistem']);
             Route::get('team/dispatchers',    [KirimAdminController::class, 'dispatchers']);
             Route::get('team/drivers',        [KirimAdminController::class, 'mitraDrivers']);
             Route::post('team/dispatchers',   [KirimAdminController::class, 'createDispatcher']);
@@ -410,10 +412,11 @@ Route::prefix('v1')->group(function () {
             Route::get('batches/{batch}/orders',       [KirimDispatchController::class, 'batchOrders']);
             Route::post('batches/{batch}/close',       [KirimDispatchController::class, 'closeBatch']);
 
-            // Route builder
+            // Route builder + active routes
             Route::get('drivers',                      [KirimDispatchController::class, 'drivers']);
             Route::post('routes',                      [KirimDispatchController::class, 'createRoute']);
             Route::get('routes/{route}',               [KirimDispatchController::class, 'routeDetail']);
+            Route::get('active-routes',                [KirimDispatchController::class, 'activeRoutes']);
 
             // Admin top-up
             Route::post('topup',                       [KirimDispatchController::class, 'topup']);

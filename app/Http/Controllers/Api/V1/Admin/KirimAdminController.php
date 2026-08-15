@@ -179,6 +179,74 @@ class KirimAdminController extends Controller
         return response()->json(['data' => $credit->fresh()]);
     }
 
+    public function show(Merchant $merchant)
+    {
+        abort_if($merchant->merchant_type !== 'kirim', 404);
+
+        $credit  = HontalKirimCredit::where('merchant_id', $merchant->id)->first();
+        $feature = MerchantFeature::where('merchant_id', $merchant->id)->where('feature', 'hontal_kirim')->first();
+        $owner   = $merchant->users()->where('role', 'merchant_owner')->first(['id', 'name', 'email']);
+
+        $transactions = HontalKirimCreditTransaction::where('merchant_id', $merchant->id)
+            ->orderByDesc('created_at')
+            ->limit(10)
+            ->get(['id', 'type', 'amount_idr', 'note', 'created_at']);
+
+        $stats = DB::table('delivery_orders')
+            ->where('merchant_id', $merchant->id)
+            ->where('delivery_type', 'hontal_kirim')
+            ->selectRaw("
+                COUNT(*) as total,
+                SUM(CASE WHEN status IN ('pending','batched') THEN 1 ELSE 0 END) as pending,
+                SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) as delivered,
+                SUM(CASE WHEN DATE(order_created_at) = CURDATE() THEN 1 ELSE 0 END) as today
+            ")
+            ->first();
+
+        return response()->json(['data' => [
+            'id'            => $merchant->id,
+            'company_name'  => $merchant->company_name,
+            'email'         => $merchant->email,
+            'phone'         => $merchant->phone,
+            'address'       => $merchant->address,
+            'slug'          => $merchant->slug,
+            'merchant_type' => $merchant->merchant_type,
+            'created_at'    => $merchant->created_at,
+            'owner'         => $owner ? $owner->only('id', 'name', 'email') : null,
+            'kirim_enabled' => (bool) $feature?->is_enabled,
+            'credit'        => [
+                'balance_idr'               => $credit?->balance_idr ?? 0,
+                'deliveries_remaining'      => $credit ? (int) floor($credit->balance_idr / 10000) : 0,
+                'low_balance_threshold_idr' => $credit?->low_balance_threshold_idr ?? 100000,
+                'is_blocked'                => $credit ? ($credit->balance_idr <= 0) : true,
+            ],
+            'order_stats'   => [
+                'total'     => (int) ($stats->total ?? 0),
+                'pending'   => (int) ($stats->pending ?? 0),
+                'delivered' => (int) ($stats->delivered ?? 0),
+                'today'     => (int) ($stats->today ?? 0),
+            ],
+            'recent_transactions' => $transactions,
+        ]]);
+    }
+
+    public function convertToSistem(Request $request, Merchant $merchant)
+    {
+        if ($merchant->merchant_type !== 'kirim') {
+            return response()->json(['message' => 'Merchant is not a Kirim merchant.'], 422);
+        }
+
+        DB::transaction(function () use ($merchant) {
+            $merchant->update(['merchant_type' => 'sistem']);
+
+            MerchantFeature::where('merchant_id', $merchant->id)
+                ->where('feature', 'hontal_kirim')
+                ->update(['is_enabled' => false]);
+        });
+
+        return response()->json(['message' => 'Merchant converted back to Sistem.', 'data' => $merchant->fresh()]);
+    }
+
     // ── Hontal Internal team ──────────────────────────────────────────────────
 
     public function dispatchers(Request $request)

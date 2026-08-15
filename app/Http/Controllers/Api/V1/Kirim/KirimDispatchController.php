@@ -260,6 +260,39 @@ class KirimDispatchController extends Controller
         ]);
     }
 
+    // ── Active routes ─────────────────────────────────────────────────────────
+
+    public function activeRoutes()
+    {
+        $routes = PooledRoute::whereIn('status', ['queued', 'in_progress'])
+            ->with([
+                'driver.user:id,name',
+                'batch:id,window_start,window_end,status',
+                'stops:id,pooled_route_id,stop_type,status',
+            ])
+            ->orderByDesc('assigned_at')
+            ->limit(30)
+            ->get()
+            ->map(fn($r) => [
+                'id'              => $r->id,
+                'status'          => $r->status,
+                'driver_name'     => $r->driver?->user?->name ?? $r->driver?->name ?? '—',
+                'vehicle_plate'   => $r->driver?->vehicle_plate ?? '—',
+                'total_stops'     => $r->total_stops,
+                'completed_stops' => $r->completed_stops,
+                'assigned_at'     => $r->assigned_at,
+                'started_at'      => $r->started_at,
+                'batch'           => $r->batch ? [
+                    'id'           => $r->batch->id,
+                    'window_start' => $r->batch->window_start,
+                    'window_end'   => $r->batch->window_end,
+                ] : null,
+                'stop_progress'   => $r->stops->groupBy('status')->map->count(),
+            ]);
+
+        return response()->json(['data' => $routes]);
+    }
+
     // ── Top-up (admin) ────────────────────────────────────────────────────────
 
     public function topup(Request $request)
