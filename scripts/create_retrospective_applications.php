@@ -14,20 +14,15 @@ use App\Models\User;
 $admin = User::where('role', 'super_admin')->first();
 
 $entries = [
-    ['slug' => 'kencana-lima', 'type' => 'sistem'],
-    ['slug' => 'ombar-distribusi', 'type' => 'kirim'],
+    ['name' => 'Kencana Lima', 'type' => 'sistem'],
+    ['name' => 'Ombar Distribusi', 'type' => 'kirim'],
 ];
 
 foreach ($entries as $entry) {
-    $merchant = Merchant::where('slug', 'like', "%{$entry['slug']}%")->first();
+    $merchant = Merchant::whereRaw('LOWER(company_name) LIKE ?', ['%' . strtolower($entry['name']) . '%'])->first();
 
     if (!$merchant) {
-        // Try fuzzy match
-        $merchant = Merchant::whereRaw('LOWER(slug) LIKE ?', ['%' . strtolower(str_replace('-', '', $entry['slug'])) . '%'])->first();
-    }
-
-    if (!$merchant) {
-        echo "  ✗ Merchant not found for slug pattern: {$entry['slug']}\n";
+        echo "  ✗ Merchant not found for name: {$entry['name']}\n";
         continue;
     }
 
