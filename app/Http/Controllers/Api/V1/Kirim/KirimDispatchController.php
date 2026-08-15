@@ -170,18 +170,20 @@ class KirimDispatchController extends Controller
         $stops = [];
         $seq   = 1;
 
-        // Pickups first — one per unique depot
+        // Pickups first — one per unique depot (skip depot stop if no depot configured)
         foreach ($depots as $depotId => $depotOrders) {
+            if (!$depotId) continue; // no depot = merchant-managed pickup, skip stop
             $depot = $depotOrders->first()->depot;
+            if (!$depot) continue;
             $stops[] = [
-                'seq'         => $seq++,
-                'type'        => 'pickup',
-                'depot_id'    => $depotId,
-                'order_ids'   => $depotOrders->pluck('id')->toArray(),
-                'latitude'    => $depot?->latitude ?? 0,
-                'longitude'   => $depot?->longitude ?? 0,
-                'contact_name'  => $depot?->contact_name,
-                'contact_phone' => $depot?->contact_phone,
+                'seq'           => $seq++,
+                'type'          => 'pickup',
+                'depot_id'      => $depotId,
+                'order_ids'     => $depotOrders->pluck('id')->toArray(),
+                'latitude'      => $depot->latitude ?? 0,
+                'longitude'     => $depot->longitude ?? 0,
+                'contact_name'  => $depot->contact_name,
+                'contact_phone' => $depot->contact_phone,
             ];
         }
 
@@ -264,12 +266,15 @@ class KirimDispatchController extends Controller
 
     public function deliveryDates()
     {
+        $kirimIds = \App\Models\Merchant::where('merchant_type', 'kirim')->pluck('id');
+
         $rows = DeliveryOrder::withoutGlobalScope(MerchantScope::class)
-            ->where('delivery_type', 'hontal_kirim')
-            ->whereNotIn('status', ['cancelled', 'failed'])
+            ->whereIn('merchant_id', $kirimIds)
+            ->whereNotIn('status', ['cancelled', 'failed', 'delivered'])
+            ->whereNotNull('requested_delivery_date')
             ->selectRaw("DATE(requested_delivery_date) as date,
                 COUNT(*) as total,
-                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as unassigned")
+                SUM(CASE WHEN status IN ('pending','batched') THEN 1 ELSE 0 END) as unassigned")
             ->groupByRaw('DATE(requested_delivery_date)')
             ->orderByRaw('DATE(requested_delivery_date)')
             ->get();
@@ -295,8 +300,10 @@ class KirimDispatchController extends Controller
     {
         $data = $request->validate(['date' => 'required|date_format:Y-m-d']);
 
+        $kirimIds = \App\Models\Merchant::where('merchant_type', 'kirim')->pluck('id');
+
         $orders = DeliveryOrder::withoutGlobalScope(MerchantScope::class)
-            ->where('delivery_type', 'hontal_kirim')
+            ->whereIn('merchant_id', $kirimIds)
             ->whereDate('requested_delivery_date', $data['date'])
             ->with([
                 'merchant:id,company_name',
