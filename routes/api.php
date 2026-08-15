@@ -407,10 +407,14 @@ Route::prefix('v1')->group(function () {
     Route::middleware(['auth:sanctum', 'role:hontal_dispatcher,super_admin,developer'])
         ->prefix('kirim/dispatch')
         ->group(function () {
-            // Batch queue
+            // Batch queue (kept for legacy)
             Route::get('batches',                      [KirimDispatchController::class, 'batches']);
             Route::get('batches/{batch}/orders',       [KirimDispatchController::class, 'batchOrders']);
             Route::post('batches/{batch}/close',       [KirimDispatchController::class, 'closeBatch']);
+
+            // Delivery date queue (primary view)
+            Route::get('delivery-dates',               [KirimDispatchController::class, 'deliveryDates']);
+            Route::get('orders-by-date',               [KirimDispatchController::class, 'ordersByDate']);
 
             // Route builder + active routes
             Route::get('drivers',                      [KirimDispatchController::class, 'drivers']);

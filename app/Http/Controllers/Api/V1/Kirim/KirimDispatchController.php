@@ -144,25 +144,25 @@ class KirimDispatchController extends Controller
     public function createRoute(Request $request)
     {
         $data = $request->validate([
-            'batch_id'   => 'required|integer|exists:hontal_kirim_batches,id',
             'driver_id'  => 'required|integer|exists:drivers,id',
             'order_ids'  => 'required|array|min:1',
             'order_ids.*'=> 'integer|exists:delivery_orders,id',
             'notes'      => 'nullable|string|max:500',
         ]);
 
-        $batch  = HontalKirimBatch::findOrFail($data['batch_id']);
         $driver = Driver::withoutGlobalScope(MerchantScope::class)->findOrFail($data['driver_id']);
 
-        // All orders must be in this batch
         $orders = DeliveryOrder::withoutGlobalScope(MerchantScope::class)
             ->whereIn('id', $data['order_ids'])
-            ->where('batch_id', $batch->id)
+            ->whereIn('status', ['pending', 'batched'])
             ->get();
 
         if ($orders->count() !== count($data['order_ids'])) {
-            return response()->json(['message' => 'One or more orders are not in this batch.'], 422);
+            return response()->json(['message' => 'One or more orders are not available for assignment.'], 422);
         }
+
+        // Representative batch — use the first order's batch for bookkeeping (nullable)
+        $batchId = $orders->first()?->batch_id;
 
         // Build pickup stops (one per unique depot) + dropoff stops (one per order)
         $depots = $orders->groupBy('depot_id');
@@ -198,9 +198,9 @@ class KirimDispatchController extends Controller
             ];
         }
 
-        $route = DB::transaction(function () use ($batch, $driver, $stops, $orders, $data, $request) {
+        $route = DB::transaction(function () use ($batchId, $driver, $stops, $orders, $data, $request) {
             $route = PooledRoute::create([
-                'batch_id'    => $batch->id,
+                'batch_id'    => $batchId,
                 'driver_id'   => $driver->id,
                 'status'      => 'queued',
                 'total_stops' => count($stops),
@@ -260,11 +260,75 @@ class KirimDispatchController extends Controller
         ]);
     }
 
+    // ── Delivery date queue ───────────────────────────────────────────────────
+
+    public function deliveryDates()
+    {
+        $rows = DeliveryOrder::withoutGlobalScope(MerchantScope::class)
+            ->where('delivery_type', 'hontal_kirim')
+            ->whereNotIn('status', ['cancelled', 'failed'])
+            ->selectRaw("DATE(requested_delivery_date) as date,
+                COUNT(*) as total,
+                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as unassigned")
+            ->groupByRaw('DATE(requested_delivery_date)')
+            ->orderByRaw('DATE(requested_delivery_date)')
+            ->get();
+
+        $today    = now()->toDateString();
+        $tomorrow = now()->addDay()->toDateString();
+
+        $data = $rows->map(fn($r) => [
+            'date'       => $r->date,
+            'label'      => match($r->date) {
+                $today    => 'Today',
+                $tomorrow => 'Tomorrow',
+                default   => \Carbon\Carbon::parse($r->date)->isoFormat('ddd, D MMM'),
+            },
+            'total'      => (int) $r->total,
+            'unassigned' => (int) $r->unassigned,
+        ]);
+
+        return response()->json(['data' => $data]);
+    }
+
+    public function ordersByDate(Request $request)
+    {
+        $data = $request->validate(['date' => 'required|date_format:Y-m-d']);
+
+        $orders = DeliveryOrder::withoutGlobalScope(MerchantScope::class)
+            ->where('delivery_type', 'hontal_kirim')
+            ->whereDate('requested_delivery_date', $data['date'])
+            ->with([
+                'merchant:id,company_name',
+                'depot:id,name,address,latitude,longitude',
+                'pooledStop:id,pooled_route_id,stop_sequence,status',
+            ])
+            ->orderBy('order_created_at')
+            ->get()
+            ->map(fn($o) => [
+                'id'                  => $o->id,
+                'order_number'        => $o->order_number,
+                'batch_id'            => $o->batch_id,
+                'merchant_id'         => $o->merchant_id,
+                'merchant_name'       => $o->merchant?->company_name,
+                'customer_name'       => $o->customer_name,
+                'delivery_address'    => $o->delivery_address,
+                'delivery_latitude'   => $o->delivery_latitude,
+                'delivery_longitude'  => $o->delivery_longitude,
+                'product_name'        => $o->product_name,
+                'status'              => $o->status,
+                'depot'               => $o->depot,
+                'assigned_to_route'   => $o->pooledStop?->pooled_route_id,
+            ]);
+
+        return response()->json(['data' => $orders]);
+    }
+
     // ── Active routes ─────────────────────────────────────────────────────────
 
     public function activeRoutes()
     {
-        $routes = PooledRoute::whereIn('status', ['queued', 'in_progress'])
+        $routes = PooledRoute::whereIn('status', ['queued', 'active'])
             ->with([
                 'driver.user:id,name',
                 'batch:id,window_start,window_end,status',
@@ -276,7 +340,7 @@ class KirimDispatchController extends Controller
             ->map(fn($r) => [
                 'id'              => $r->id,
                 'status'          => $r->status,
-                'driver_name'     => $r->driver?->user?->name ?? $r->driver?->name ?? '—',
+                'driver_name'     => $r->driver?->user?->name ?? '—',
                 'vehicle_plate'   => $r->driver?->vehicle_plate ?? '—',
                 'total_stops'     => $r->total_stops,
                 'completed_stops' => $r->completed_stops,
