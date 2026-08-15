@@ -96,10 +96,11 @@ class AuthController extends Controller
             'role'       => $user->role,
             'can_logout' => $user->can_logout ?? true,
             'merchant' => $user->merchant ? [
-                'id'           => $user->merchant->id,
-                'company_name' => $user->merchant->company_name,
-                'slug'         => $user->merchant->slug,
-                'timezone'     => $user->merchant->timezone,
+                'id'            => $user->merchant->id,
+                'company_name'  => $user->merchant->company_name,
+                'slug'          => $user->merchant->slug,
+                'timezone'      => $user->merchant->timezone,
+                'merchant_type' => $user->merchant->merchant_type,
             ] : null,
         ];
     }

@@ -18,6 +18,7 @@ class MerchantApplication extends Model
         'estimated_monthly_deliveries', 'selected_plan',
         'notes', 'rejection_reason', 'internal_notes',
         'status', 'approved_by', 'approved_at',
+        'merchant_type_requested',
     ];
 
     protected $casts = [

@@ -39,8 +39,10 @@ class ApplicationController extends Controller
             return response()->json(['message' => 'Only pending or review applications can be approved.'], 422);
         }
 
+        $merchantType = $application->merchant_type_requested ?? 'sistem';
+
         try {
-            $result = $this->provisioningService->provision($application, $request->user()->id);
+            $result = $this->provisioningService->provision($application, $request->user()->id, $merchantType);
         } catch (\Throwable $e) {
             report($e);
             return response()->json(['message' => 'Provisioning failed: ' . $e->getMessage()], 500);
@@ -55,8 +57,86 @@ class ApplicationController extends Controller
                 'temp_password' => $result['temp_password'],
                 'plan'          => $result['plan']?->name,
                 'trial_ends_at' => $result['subscription']->trial_ends_at?->toDateString(),
+                'merchant_type' => $merchantType,
             ],
         ]);
+    }
+
+    public function approveAsKirim(Request $request, MerchantApplication $application)
+    {
+        if (!$application->isActionable()) {
+            return response()->json(['message' => 'Only pending or review applications can be approved.'], 422);
+        }
+
+        try {
+            $result = $this->provisioningService->provision($application, $request->user()->id, 'kirim');
+        } catch (\Throwable $e) {
+            report($e);
+            return response()->json(['message' => 'Provisioning failed: ' . $e->getMessage()], 500);
+        }
+
+        return response()->json([
+            'message' => 'Application approved as Kirim merchant. Workspace provisioned.',
+            'data'    => [
+                'merchant_id'   => $result['merchant']->id,
+                'merchant_name' => $result['merchant']->company_name,
+                'user_email'    => $result['user']->email,
+                'temp_password' => $result['temp_password'],
+                'plan'          => $result['plan']?->name,
+                'trial_ends_at' => $result['subscription']->trial_ends_at?->toDateString(),
+                'merchant_type' => 'kirim',
+            ],
+        ]);
+    }
+
+    public function update(Request $request, MerchantApplication $application)
+    {
+        if (in_array($application->status, ['approved', 'converted', 'rejected'])) {
+            return response()->json(['message' => 'Cannot edit a finalized application.'], 422);
+        }
+
+        $data = $request->validate([
+            'company_name'                  => 'sometimes|string|max:255',
+            'owner_name'                    => 'sometimes|string|max:255',
+            'email'                         => 'sometimes|email|max:255',
+            'phone'                         => 'sometimes|nullable|string|max:30',
+            'city'                          => 'sometimes|nullable|string|max:100',
+            'business_type'                 => 'sometimes|nullable|string|max:100',
+            'branch_count'                  => 'sometimes|nullable|integer|min:0',
+            'estimated_monthly_deliveries'  => 'sometimes|nullable|integer|min:0',
+            'selected_plan'                 => 'sometimes|nullable|string|max:50',
+            'notes'                         => 'sometimes|nullable|string|max:2000',
+            'merchant_type_requested'       => 'sometimes|nullable|in:sistem,kirim',
+        ]);
+
+        $application->update($data);
+
+        return response()->json(['data' => $application->fresh()->load('approvedBy:id,name')]);
+    }
+
+    public function store(Request $request)
+    {
+        $data = $request->validate([
+            'company_name'                  => 'required|string|max:255',
+            'owner_name'                    => 'required|string|max:255',
+            'email'                         => 'required|email|max:255',
+            'phone'                         => 'nullable|string|max:30',
+            'city'                          => 'nullable|string|max:100',
+            'business_type'                 => 'nullable|string|max:100',
+            'branch_count'                  => 'nullable|integer|min:0',
+            'estimated_monthly_deliveries'  => 'nullable|integer|min:0',
+            'selected_plan'                 => 'nullable|string|max:50',
+            'notes'                         => 'nullable|string|max:2000',
+            'status'                        => 'nullable|in:pending,approved,converted',
+            'merchant_type_requested'       => 'nullable|in:sistem,kirim',
+        ]);
+
+        $application = MerchantApplication::create([
+            ...$data,
+            'status' => $data['status'] ?? 'pending',
+        ]);
+
+        return response()->json(['data' => $application], 201);
     }
 
     public function reject(Request $request, MerchantApplication $application)

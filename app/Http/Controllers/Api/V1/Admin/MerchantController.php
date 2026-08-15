@@ -7,6 +7,8 @@ use App\Models\DeliveryOrder;
 use App\Models\Driver;
 use App\Models\GoogleApiUsageLog;
 use App\Models\Merchant;
+use App\Models\HontalKirimCredit;
+use App\Models\MerchantFeature;
 use App\Models\MerchantSubscription;
 use App\Models\PlatformPlan;
 use App\Models\User;
@@ -86,8 +88,11 @@ class MerchantController extends Controller
             )
             ->when($request->merchant_type,
                 fn($q, $t) => $q->where('merchants.merchant_type', $t),
-                // By default exclude Hontal Internal from merchant lists
-                fn($q)     => $q->where(fn($q) => $q->where('merchants.merchant_type', '!=', 'internal')->orWhereNull('merchants.merchant_type'))
+                // By default: Sistem Merchants page — exclude internal and kirim
+                fn($q) => $q->where(fn($q) => $q
+                    ->whereNotIn('merchants.merchant_type', ['kirim', 'internal'])
+                    ->orWhereNull('merchants.merchant_type')
+                )
             );
 
         $sort = $request->sort ?? 'created';
@@ -457,5 +462,28 @@ class MerchantController extends Controller
         );
 
         return response()->json(['message' => 'Notes saved.']);
+    }
+
+    public function convertToKirim(Request $request, Merchant $merchant): JsonResponse
+    {
+        if (in_array($merchant->merchant_type, ['internal', 'kirim'])) {
+            return response()->json(['message' => 'Merchant is already ' . $merchant->merchant_type . '.'], 422);
+        }
+
+        DB::transaction(function () use ($merchant) {
+            $merchant->update(['merchant_type' => 'kirim']);
+
+            MerchantFeature::updateOrCreate(
+                ['merchant_id' => $merchant->id, 'feature' => 'hontal_kirim'],
+                ['is_enabled' => true]
+            );
+
+            HontalKirimCredit::firstOrCreate(
+                ['merchant_id' => $merchant->id],
+                ['balance_idr' => 0, 'low_balance_threshold_idr' => 100_000]
+            );
+        });
+
+        return response()->json(['message' => 'Merchant converted to Kirim.', 'data' => $merchant->fresh()]);
     }
 }

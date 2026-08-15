@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\HontalKirimCredit;
 use App\Models\Merchant;
 use App\Models\MerchantApplication;
 use App\Models\MerchantCashier;
@@ -25,9 +26,9 @@ class MerchantProvisioningService
      *
      * @return array{merchant: Merchant, user: User, subscription: MerchantSubscription, temp_password: string}
      */
-    public function provision(MerchantApplication $application, ?int $approvedBy = null): array
+    public function provision(MerchantApplication $application, ?int $approvedBy = null, string $merchantType = 'sistem'): array
     {
-        return DB::transaction(function () use ($application, $approvedBy) {
+        return DB::transaction(function () use ($application, $approvedBy, $merchantType) {
 
             // 1. Create Merchant
             $slug     = Str::slug($application->company_name);
@@ -37,13 +38,14 @@ class MerchantProvisioningService
             }
 
             $merchant = Merchant::create([
-                'ulid'         => (string) Str::ulid(),
-                'company_name' => $application->company_name,
-                'slug'         => $slug,
-                'address'      => $application->city ?? '',
-                'phone'        => $application->phone,
-                'email'        => $application->email,
-                'timezone'     => 'Asia/Jakarta',
+                'ulid'          => (string) Str::ulid(),
+                'company_name'  => $application->company_name,
+                'slug'          => $slug,
+                'address'       => $application->city ?? '',
+                'phone'         => $application->phone,
+                'email'         => $application->email,
+                'timezone'      => 'Asia/Jakarta',
+                'merchant_type' => $merchantType,
             ]);
 
             // 2. Create default MerchantSetting with V2 routing defaults
@@ -109,6 +111,20 @@ class MerchantProvisioningService
                     'merchant_id' => $merchant->id,
                     'vip_level'   => $level,
                     'score_value' => $score,
+                ]);
+            }
+
+            // 8a. For Kirim merchants: enable hontal_kirim feature and create credit record
+            if ($merchantType === 'kirim') {
+                MerchantFeature::create([
+                    'merchant_id' => $merchant->id,
+                    'feature'     => 'hontal_kirim',
+                    'is_enabled'  => true,
+                ]);
+                HontalKirimCredit::create([
+                    'merchant_id'                => $merchant->id,
+                    'balance_idr'                => 0,
+                    'low_balance_threshold_idr'  => 100_000,
                 ]);
             }
 

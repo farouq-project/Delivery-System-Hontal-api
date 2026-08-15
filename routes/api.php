@@ -281,13 +281,16 @@ Route::prefix('v1')->group(function () {
         Route::patch('platform/settings',      [PlatformSettingsController::class, 'update']);
 
         // Applications
-        Route::get('applications',                               [ApplicationController::class, 'index']);
-        Route::get('applications/{application}',                 [ApplicationController::class, 'show']);
-        Route::patch('applications/{application}/approve',       [ApplicationController::class, 'approve']);
-        Route::patch('applications/{application}/reject',        [ApplicationController::class, 'reject']);
-        Route::patch('applications/{application}/request-info',  [ApplicationController::class, 'requestInfo']);
-        Route::patch('applications/{application}/notes',         [ApplicationController::class, 'notes']);
-        Route::delete('applications/{application}',              [ApplicationController::class, 'destroy']);
+        Route::get('applications',                                    [ApplicationController::class, 'index']);
+        Route::post('applications',                                   [ApplicationController::class, 'store']);
+        Route::get('applications/{application}',                      [ApplicationController::class, 'show']);
+        Route::patch('applications/{application}',                    [ApplicationController::class, 'update']);
+        Route::patch('applications/{application}/approve',            [ApplicationController::class, 'approve']);
+        Route::patch('applications/{application}/approve-kirim',      [ApplicationController::class, 'approveAsKirim']);
+        Route::patch('applications/{application}/reject',             [ApplicationController::class, 'reject']);
+        Route::patch('applications/{application}/request-info',       [ApplicationController::class, 'requestInfo']);
+        Route::patch('applications/{application}/notes',              [ApplicationController::class, 'notes']);
+        Route::delete('applications/{application}',                   [ApplicationController::class, 'destroy']);
 
         // Merchant directory & management
         Route::get('merchants/growth-targets',                         [AdminMerchantController::class, 'growthTargets']);
@@ -343,6 +346,9 @@ Route::prefix('v1')->group(function () {
 
         // Customer Intelligence — cross-merchant search (super_admin only)
         Route::get('customers/search', [AdminCustomerController::class, 'search']);
+
+        // Convert a Sistem merchant to Kirim type
+        Route::post('merchants/{merchant}/convert-kirim', [MerchantController::class, 'convertToKirim']);
 
         // Hontal Kirim admin — merchant management + internal team
         Route::prefix('kirim')->group(function () {
