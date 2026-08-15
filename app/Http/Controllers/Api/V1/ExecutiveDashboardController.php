@@ -10,7 +10,7 @@ use Illuminate\Http\Request;
 
 class ExecutiveDashboardController extends Controller
 {
-    private const ALLOWED_ROLES = ['merchant_owner', 'developer', 'super_admin'];
+    private const ALLOWED_ROLES = ['merchant_owner', 'developer', 'super_admin', 'merchant_ops'];
 
     public function __construct(
         private readonly ExecutiveDashboardService $service,
