@@ -429,46 +429,62 @@ class OrderController extends Controller
     {
         $this->authorizeMerchant($request, $order->merchant_id);
 
-        if (!$order->driver_id) {
-            return response()->json(['message' => 'Order has no assigned driver.'], 422);
+        // Allow unassigning orders that are 'assigned' regardless of driver_id.
+        // Kirim-dispatched orders may have driver_id=null on the order itself
+        // (pre-backfill) while still being attached to a PooledRoute.
+        if ($order->status !== 'assigned') {
+            return response()->json(['message' => 'Only assigned orders can be unassigned.'], 422);
         }
 
         $previousDriverId = $order->driver_id;
 
-        DB::transaction(function () use ($order) {
-            // Sistem layer: RouteStop
-            $stop = RouteStop::where('order_id', $order->id)->first();
-            if ($stop) {
-                $route = $stop->route;
-                RouteStop::where('route_assignment_id', $stop->route_assignment_id)
-                    ->where('stop_sequence', '>', $stop->stop_sequence)
-                    ->decrement('stop_sequence');
-                $stop->delete();
-                $route?->decrement('total_stops');
-            }
-
-            // Kirim layer: PooledStop (handles Hontal Kirim orders)
-            $pooledStop = PooledStop::where('order_id', $order->id)->first();
-            if ($pooledStop) {
-                $pooledRoute = $pooledStop->route;
-                DB::table('pooled_stop_orders')->where('order_id', $order->id)->delete();
-                PooledStop::where('pooled_route_id', $pooledStop->pooled_route_id)
-                    ->where('stop_sequence', '>', $pooledStop->stop_sequence)
-                    ->decrement('stop_sequence');
-                $pooledStop->delete();
-                if ($pooledRoute) {
-                    $remaining = $pooledRoute->stops()->count();
-                    $pooledRoute->update($remaining === 0
-                        ? ['status' => 'cancelled', 'total_stops' => 0]
-                        : ['total_stops' => $remaining]
-                    );
+        try {
+            DB::transaction(function () use ($order) {
+                // Sistem layer: RouteStop
+                $stop = RouteStop::where('order_id', $order->id)->first();
+                if ($stop) {
+                    $route = $stop->route;
+                    RouteStop::where('route_assignment_id', $stop->route_assignment_id)
+                        ->where('stop_sequence', '>', $stop->stop_sequence)
+                        ->decrement('stop_sequence');
+                    $stop->delete();
+                    $route?->decrement('total_stops');
                 }
-            }
-        });
+
+                // Kirim layer: PooledStop dropoff record
+                $pooledStop = PooledStop::where('order_id', $order->id)->first();
+                if ($pooledStop) {
+                    $pooledRoute = $pooledStop->route;
+                    PooledStop::where('pooled_route_id', $pooledStop->pooled_route_id)
+                        ->where('stop_sequence', '>', $pooledStop->stop_sequence)
+                        ->decrement('stop_sequence');
+                    $pooledStop->delete();
+                    if ($pooledRoute && $pooledRoute->exists) {
+                        $remaining = $pooledRoute->stops()->count();
+                        $pooledRoute->update($remaining === 0
+                            ? ['status' => 'cancelled', 'total_stops' => 0]
+                            : ['total_stops' => $remaining]
+                        );
+                    }
+                }
+
+                // Clean up pickup-pivot (safe no-op if table doesn't exist yet)
+                try {
+                    DB::table('pooled_stop_orders')->where('order_id', $order->id)->delete();
+                } catch (\Throwable) {
+                    // Table missing on older deployments — run php artisan migrate
+                }
+            });
+        } catch (\Throwable $e) {
+            report($e);
+            return response()->json(['message' => 'Could not unassign order: ' . $e->getMessage()], 422);
+        }
 
         $this->orderService->transition($order, 'pending', $request->user(), [
             'driver_id' => null,
-            'notes'     => "Unassigned from driver #{$previousDriverId}",
+            'notes'     => $previousDriverId
+                ? "Unassigned from driver #{$previousDriverId}"
+                : 'Unassigned from kirim route',
         ]);
 
         return response()->json(['data' => $order->fresh()->load(['driver:id,driver_name'])]);
