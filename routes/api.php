@@ -418,6 +418,7 @@ Route::prefix('v1')->group(function () {
 
             // Route builder + active routes
             Route::get('drivers',                      [KirimDispatchController::class, 'drivers']);
+            Route::post('preview-route',               [KirimDispatchController::class, 'previewRoute']);
             Route::post('routes',                      [KirimDispatchController::class, 'createRoute']);
             Route::get('routes/{route}',               [KirimDispatchController::class, 'routeDetail']);
             Route::delete('routes/{route}',            [KirimDispatchController::class, 'cancelRoute']);

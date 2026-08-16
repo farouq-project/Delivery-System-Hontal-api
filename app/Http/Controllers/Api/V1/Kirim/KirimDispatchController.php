@@ -160,6 +160,55 @@ class KirimDispatchController extends Controller
         return response()->json(['data' => $drivers]);
     }
 
+    public function previewRoute(Request $request)
+    {
+        $request->validate([
+            'order_ids'   => 'required|array|min:1',
+            'order_ids.*' => 'integer|exists:delivery_orders,id',
+        ]);
+
+        $orders = DeliveryOrder::withoutGlobalScope(MerchantScope::class)
+            ->whereIn('id', $request->order_ids)
+            ->with('depot')
+            ->get();
+
+        if ($orders->isEmpty()) {
+            return response()->json(['data' => ['ordered_ids' => [], 'origin' => null]]);
+        }
+
+        $merchantDepot = null;
+        $originInfo    = null;
+
+        $kirimMerchants = \App\Models\Merchant::withoutGlobalScope(MerchantScope::class)
+            ->with('settings')
+            ->whereIn('id', $orders->pluck('merchant_id')->unique()->values())
+            ->get();
+
+        foreach ($kirimMerchants as $m) {
+            if ($m->settings?->depot_latitude && $m->settings?->depot_longitude) {
+                $merchantDepot = [
+                    'lat' => (float) $m->settings->depot_latitude,
+                    'lng' => (float) $m->settings->depot_longitude,
+                ];
+                $originInfo = array_merge($merchantDepot, [
+                    'name'    => $m->company_name,
+                    'address' => $m->settings->depot_address,
+                ]);
+                break;
+            }
+        }
+
+        $locatedOrders = $orders->filter(fn($o) => $o->delivery_latitude && $o->delivery_longitude);
+        $orderedIds    = $this->optimizeDeliveries($orders, $locatedOrders, $merchantDepot);
+
+        return response()->json([
+            'data' => [
+                'ordered_ids' => $orderedIds,
+                'origin'      => $originInfo,
+            ],
+        ]);
+    }
+
     public function createRoute(Request $request)
     {
         $data = $request->validate([
