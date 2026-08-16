@@ -62,11 +62,15 @@ class DriverAppController extends Controller
             return response()->json(['data' => ['stops' => [], 'total_stops' => 0, 'completed_stops' => 0, 'can_logout' => $canLogout, 'klotter_size' => $klotterSize]]);
         }
 
-        // Pooled route (Kirim) — separate from Sistem klotter stops
+        // Pooled route (Kirim) — separate from Sistem klotter stops.
+        // Allow null batch_id (merchant_managed orders routed via kirim dispatch).
         $pooledRoute = PooledRoute::withoutGlobalScope(MerchantScope::class)
             ->where('driver_id', $driver->id)
             ->whereIn('status', ['queued', 'active'])
-            ->whereHas('batch', fn($q) => $q->whereDate('window_start', today()))
+            ->where(function ($q) {
+                $q->whereNull('batch_id')
+                  ->orWhereHas('batch', fn($q) => $q->whereDate('window_start', today()));
+            })
             ->with(['stops' => function ($q) {
                 $q->with([
                     'order:id,order_number,customer_name,customer_phone,delivery_address,delivery_latitude,delivery_longitude,delivery_notes,product_name,order_value,payment_method,status',

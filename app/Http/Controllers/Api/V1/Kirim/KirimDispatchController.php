@@ -330,6 +330,9 @@ class KirimDispatchController extends Controller
                 'notes'       => $data['notes'] ?? null,
             ]);
 
+            // Track dropoff stop sequence per order so we can set route_sequence
+            $orderSeqMap = [];
+
             foreach ($stops as $stop) {
                 $pooledStop = PooledStop::create([
                     'pooled_route_id' => $route->id,
@@ -351,12 +354,27 @@ class KirimDispatchController extends Controller
                             'order_id'       => $oid,
                         ])->toArray()
                     );
+                } elseif ($stop['type'] === 'dropoff') {
+                    $orderSeqMap[$stop['order_id']] = $stop['seq'];
                 }
             }
 
+            // Write driver_id + route_sequence on each order so the merchant's
+            // klotter page, live map, and driver app can query them normally.
             DeliveryOrder::withoutGlobalScope(MerchantScope::class)
                 ->whereIn('id', $orders->pluck('id'))
-                ->update(['status' => 'assigned', 'assigned_at' => now()]);
+                ->update([
+                    'status'      => 'assigned',
+                    'assigned_at' => now(),
+                    'driver_id'   => $driver->id,
+                ]);
+
+            // Individual route_sequence per order (can't be done in one bulk update)
+            foreach ($orderSeqMap as $orderId => $seq) {
+                DeliveryOrder::withoutGlobalScope(MerchantScope::class)
+                    ->where('id', $orderId)
+                    ->update(['route_sequence' => $seq]);
+            }
 
             return $route;
         });
