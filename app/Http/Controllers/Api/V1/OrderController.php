@@ -520,43 +520,45 @@ class OrderController extends Controller
         if ($request->status === 'pending') {
             $context['driver_id'] = null;
 
-            DB::transaction(function () use ($order) {
-                // Sistem layer: RouteStop (sistem merchant dispatch)
-                $routeStop = RouteStop::where('order_id', $order->id)->first();
-                if ($routeStop) {
-                    $route = $routeStop->route;
-                    RouteStop::where('route_assignment_id', $routeStop->route_assignment_id)
-                        ->where('stop_sequence', '>', $routeStop->stop_sequence)
-                        ->decrement('stop_sequence');
-                    $routeStop->delete();
-                    $route?->decrement('total_stops');
-                }
+            try {
+                DB::transaction(function () use ($order) {
+                    // Sistem layer: RouteStop (sistem merchant dispatch)
+                    $routeStop = RouteStop::where('order_id', $order->id)->first();
+                    if ($routeStop) {
+                        $route = $routeStop->route;
+                        RouteStop::where('route_assignment_id', $routeStop->route_assignment_id)
+                            ->where('stop_sequence', '>', $routeStop->stop_sequence)
+                            ->decrement('stop_sequence');
+                        $routeStop->delete();
+                        $route?->decrement('total_stops');
+                    }
 
-                // Kirim layer: PooledStop (Hontal Kirim pooled dispatch)
-                $pooledStop = PooledStop::where('order_id', $order->id)->first();
-                if ($pooledStop) {
-                    $pooledRoute = $pooledStop->route;
-
-                    // Remove from pickup pivot (if this order was part of a pickup group)
-                    DB::table('pooled_stop_orders')->where('order_id', $order->id)->delete();
-
-                    // Re-sequence remaining stops in this route after the deleted one
-                    PooledStop::where('pooled_route_id', $pooledStop->pooled_route_id)
-                        ->where('stop_sequence', '>', $pooledStop->stop_sequence)
-                        ->decrement('stop_sequence');
-
-                    $pooledStop->delete();
-
-                    if ($pooledRoute) {
-                        $remaining = $pooledRoute->stops()->count();
-                        if ($remaining === 0) {
-                            $pooledRoute->update(['status' => 'cancelled', 'total_stops' => 0]);
-                        } else {
-                            $pooledRoute->update(['total_stops' => $remaining]);
+                    // Kirim layer: PooledStop dropoff record
+                    $pooledStop = PooledStop::where('order_id', $order->id)->first();
+                    if ($pooledStop) {
+                        $pooledRoute = $pooledStop->route;
+                        PooledStop::where('pooled_route_id', $pooledStop->pooled_route_id)
+                            ->where('stop_sequence', '>', $pooledStop->stop_sequence)
+                            ->decrement('stop_sequence');
+                        $pooledStop->delete();
+                        if ($pooledRoute && $pooledRoute->exists) {
+                            $remaining = $pooledRoute->stops()->count();
+                            $pooledRoute->update($remaining === 0
+                                ? ['status' => 'cancelled', 'total_stops' => 0]
+                                : ['total_stops' => $remaining]
+                            );
                         }
                     }
-                }
-            });
+
+                    // Always clean up pickup-pivot regardless of whether a dropoff stop was found
+                    DB::table('pooled_stop_orders')->where('order_id', $order->id)->delete();
+                });
+            } catch (\Throwable $e) {
+                report($e);
+                return response()->json([
+                    'message' => 'Could not reset order: ' . $e->getMessage(),
+                ], 422);
+            }
         }
 
         $this->orderService->transition($order, $request->status, $request->user(), $context);

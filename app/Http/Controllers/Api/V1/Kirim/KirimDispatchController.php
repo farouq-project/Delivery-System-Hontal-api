@@ -9,6 +9,7 @@ use App\Models\PlatformSetting;
 use App\Models\PooledRoute;
 use App\Models\PooledStop;
 use App\Models\DeliveryOrder;
+use App\Models\RouteStop;
 use App\Models\Scopes\MerchantScope;
 use App\Services\KirimBatchService;
 use App\Services\RoutingEngine\Clustering\GeographicClusterer;
@@ -220,17 +221,37 @@ class KirimDispatchController extends Controller
 
         $driver = Driver::withoutGlobalScope(MerchantScope::class)->findOrFail($data['driver_id']);
 
+        // Accept pending, batched, AND assigned orders — assigned orders are
+        // auto-unassigned from their previous pooled/sistem routes before the
+        // new route is built. This handles merchants that switched types and
+        // have orders stuck in 'assigned' state from an old route.
         $orders = DeliveryOrder::withoutGlobalScope(MerchantScope::class)
             ->whereIn('id', $data['order_ids'])
-            ->whereIn('status', ['pending', 'batched'])
+            ->whereIn('status', ['pending', 'batched', 'assigned'])
             ->with(['depot'])
             ->get();
 
         if ($orders->count() !== count($data['order_ids'])) {
-            return response()->json(['message' => 'One or more orders are not available for assignment.'], 422);
+            return response()->json(['message' => 'One or more orders are not available (wrong status or not found).'], 422);
         }
 
-        $batchId = $orders->first()?->batch_id;
+        // Auto-unassign any orders that are currently 'assigned' from old routes
+        $stuckOrders = $orders->where('status', 'assigned');
+        if ($stuckOrders->isNotEmpty()) {
+            DB::transaction(function () use ($stuckOrders) {
+                foreach ($stuckOrders as $order) {
+                    $this->detachOrderFromRoutes($order);
+                }
+            });
+            // Refresh collection so status reflects 'pending'
+            $orders = DeliveryOrder::withoutGlobalScope(MerchantScope::class)
+                ->whereIn('id', $data['order_ids'])
+                ->with(['depot'])
+                ->get();
+        }
+
+        // Use the batch_id from hontal_kirim orders; null is fine for merchant_managed orders
+        $batchId = $orders->firstWhere('batch_id', '!=', null)?->batch_id;
 
         // Optimize delivery stop sequence using NN + 2-opt before building the route
         $locatedOrders   = $orders->filter(fn($o) => $o->delivery_latitude && $o->delivery_longitude);
@@ -343,6 +364,48 @@ class KirimDispatchController extends Controller
         return response()->json([
             'data' => $route->load(['stops', 'driver.user']),
         ], 201);
+    }
+
+    /**
+     * Remove an order from any existing sistem (RouteStop) or Kirim (PooledStop)
+     * dispatch records and reset its status to pending. Called inside a DB
+     * transaction when reassigning 'assigned' orders to a new pooled route.
+     */
+    private function detachOrderFromRoutes(DeliveryOrder $order): void
+    {
+        // Sistem layer
+        $routeStop = RouteStop::where('order_id', $order->id)->first();
+        if ($routeStop) {
+            $route = $routeStop->route;
+            RouteStop::where('route_assignment_id', $routeStop->route_assignment_id)
+                ->where('stop_sequence', '>', $routeStop->stop_sequence)
+                ->decrement('stop_sequence');
+            $routeStop->delete();
+            $route?->decrement('total_stops');
+        }
+
+        // Kirim layer — dropoff stop
+        $pooledStop = PooledStop::where('order_id', $order->id)->first();
+        if ($pooledStop) {
+            $pooledRoute = $pooledStop->route;
+            DB::table('pooled_stop_orders')->where('order_id', $order->id)->delete();
+            PooledStop::where('pooled_route_id', $pooledStop->pooled_route_id)
+                ->where('stop_sequence', '>', $pooledStop->stop_sequence)
+                ->decrement('stop_sequence');
+            $pooledStop->delete();
+            if ($pooledRoute) {
+                $remaining = $pooledRoute->stops()->count();
+                $pooledRoute->update($remaining === 0
+                    ? ['status' => 'cancelled', 'total_stops' => 0]
+                    : ['total_stops' => $remaining]
+                );
+            }
+        }
+
+        // Kirim layer — pickup pivot (order listed in a pickup stop but has no direct pooled_stop row)
+        DB::table('pooled_stop_orders')->where('order_id', $order->id)->delete();
+
+        $order->update(['status' => 'pending', 'driver_id' => null, 'assigned_at' => null, 'route_sequence' => null]);
     }
 
     /**
