@@ -435,15 +435,36 @@ class OrderController extends Controller
 
         $previousDriverId = $order->driver_id;
 
-        $stop = RouteStop::where('order_id', $order->id)->first();
-        if ($stop) {
-            $route = $stop->route;
-            RouteStop::where('route_assignment_id', $stop->route_assignment_id)
-                ->where('stop_sequence', '>', $stop->stop_sequence)
-                ->decrement('stop_sequence');
-            $stop->delete();
-            $route->decrement('total_stops');
-        }
+        DB::transaction(function () use ($order) {
+            // Sistem layer: RouteStop
+            $stop = RouteStop::where('order_id', $order->id)->first();
+            if ($stop) {
+                $route = $stop->route;
+                RouteStop::where('route_assignment_id', $stop->route_assignment_id)
+                    ->where('stop_sequence', '>', $stop->stop_sequence)
+                    ->decrement('stop_sequence');
+                $stop->delete();
+                $route?->decrement('total_stops');
+            }
+
+            // Kirim layer: PooledStop (handles Hontal Kirim orders)
+            $pooledStop = PooledStop::where('order_id', $order->id)->first();
+            if ($pooledStop) {
+                $pooledRoute = $pooledStop->route;
+                DB::table('pooled_stop_orders')->where('order_id', $order->id)->delete();
+                PooledStop::where('pooled_route_id', $pooledStop->pooled_route_id)
+                    ->where('stop_sequence', '>', $pooledStop->stop_sequence)
+                    ->decrement('stop_sequence');
+                $pooledStop->delete();
+                if ($pooledRoute) {
+                    $remaining = $pooledRoute->stops()->count();
+                    $pooledRoute->update($remaining === 0
+                        ? ['status' => 'cancelled', 'total_stops' => 0]
+                        : ['total_stops' => $remaining]
+                    );
+                }
+            }
+        });
 
         $this->orderService->transition($order, 'pending', $request->user(), [
             'driver_id' => null,

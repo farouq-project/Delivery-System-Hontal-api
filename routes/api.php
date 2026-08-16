@@ -348,7 +348,7 @@ Route::prefix('v1')->group(function () {
         Route::get('customers/search', [AdminCustomerController::class, 'search']);
 
         // Convert a Sistem merchant to Kirim type
-        Route::post('merchants/{merchant}/convert-kirim', [MerchantController::class, 'convertToKirim']);
+        Route::post('merchants/{merchant}/convert-kirim', [AdminMerchantController::class, 'convertToKirim']);
 
         // Hontal Kirim admin — merchant management + internal team
         Route::prefix('kirim')->group(function () {
