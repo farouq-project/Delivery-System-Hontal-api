@@ -391,26 +391,25 @@ class KirimDispatchController extends Controller
      */
     private function detachOrderFromRoutes(DeliveryOrder $order): void
     {
-        // Sistem layer
+        // Sistem layer: delete first to avoid (route_assignment_id, stop_sequence) unique conflict.
         $routeStop = RouteStop::where('order_id', $order->id)->first();
         if ($routeStop) {
             $route = $routeStop->route;
+            $routeStop->delete();
             RouteStop::where('route_assignment_id', $routeStop->route_assignment_id)
                 ->where('stop_sequence', '>', $routeStop->stop_sequence)
                 ->decrement('stop_sequence');
-            $routeStop->delete();
             $route?->decrement('total_stops');
         }
 
-        // Kirim layer — dropoff stop
+        // Kirim layer — dropoff stop: same delete-first pattern.
         $pooledStop = PooledStop::where('order_id', $order->id)->first();
         if ($pooledStop) {
             $pooledRoute = $pooledStop->route;
-            DB::table('pooled_stop_orders')->where('order_id', $order->id)->delete();
+            $pooledStop->delete();
             PooledStop::where('pooled_route_id', $pooledStop->pooled_route_id)
                 ->where('stop_sequence', '>', $pooledStop->stop_sequence)
                 ->decrement('stop_sequence');
-            $pooledStop->delete();
             if ($pooledRoute) {
                 $remaining = $pooledRoute->stops()->count();
                 $pooledRoute->update($remaining === 0
@@ -420,8 +419,10 @@ class KirimDispatchController extends Controller
             }
         }
 
-        // Kirim layer — pickup pivot (order listed in a pickup stop but has no direct pooled_stop row)
-        DB::table('pooled_stop_orders')->where('order_id', $order->id)->delete();
+        // Kirim layer — pickup pivot. Safe no-op if table missing until migrate runs.
+        try {
+            DB::table('pooled_stop_orders')->where('order_id', $order->id)->delete();
+        } catch (\Throwable) {}
 
         $order->update(['status' => 'pending', 'driver_id' => null, 'assigned_at' => null, 'route_sequence' => null]);
     }

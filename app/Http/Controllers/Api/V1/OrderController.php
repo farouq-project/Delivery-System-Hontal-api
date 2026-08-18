@@ -440,25 +440,25 @@ class OrderController extends Controller
 
         try {
             DB::transaction(function () use ($order) {
-                // Sistem layer: RouteStop
+                // Sistem layer: delete first to avoid (route_assignment_id, stop_sequence) unique conflict.
                 $stop = RouteStop::where('order_id', $order->id)->first();
                 if ($stop) {
                     $route = $stop->route;
+                    $stop->delete();
                     RouteStop::where('route_assignment_id', $stop->route_assignment_id)
                         ->where('stop_sequence', '>', $stop->stop_sequence)
                         ->decrement('stop_sequence');
-                    $stop->delete();
                     $route?->decrement('total_stops');
                 }
 
-                // Kirim layer: PooledStop dropoff record
+                // Kirim layer: same delete-first pattern for pooled_stops unique constraint.
                 $pooledStop = PooledStop::where('order_id', $order->id)->first();
                 if ($pooledStop) {
                     $pooledRoute = $pooledStop->route;
+                    $pooledStop->delete();
                     PooledStop::where('pooled_route_id', $pooledStop->pooled_route_id)
                         ->where('stop_sequence', '>', $pooledStop->stop_sequence)
                         ->decrement('stop_sequence');
-                    $pooledStop->delete();
                     if ($pooledRoute && $pooledRoute->exists) {
                         $remaining = $pooledRoute->stops()->count();
                         $pooledRoute->update($remaining === 0
@@ -468,12 +468,10 @@ class OrderController extends Controller
                     }
                 }
 
-                // Clean up pickup-pivot (safe no-op if table doesn't exist yet)
+                // Pickup-pivot cleanup — safe no-op if table missing until migrate runs.
                 try {
                     DB::table('pooled_stop_orders')->where('order_id', $order->id)->delete();
-                } catch (\Throwable) {
-                    // Table missing on older deployments — run php artisan migrate
-                }
+                } catch (\Throwable) {}
             });
         } catch (\Throwable $e) {
             report($e);
@@ -538,25 +536,26 @@ class OrderController extends Controller
 
             try {
                 DB::transaction(function () use ($order) {
-                    // Sistem layer: RouteStop (sistem merchant dispatch)
+                    // Sistem layer: delete the stop FIRST so decrementing later stops
+                    // does not temporarily duplicate (route_assignment_id, stop_sequence).
                     $routeStop = RouteStop::where('order_id', $order->id)->first();
                     if ($routeStop) {
                         $route = $routeStop->route;
+                        $routeStop->delete();
                         RouteStop::where('route_assignment_id', $routeStop->route_assignment_id)
                             ->where('stop_sequence', '>', $routeStop->stop_sequence)
                             ->decrement('stop_sequence');
-                        $routeStop->delete();
                         $route?->decrement('total_stops');
                     }
 
-                    // Kirim layer: PooledStop dropoff record
+                    // Kirim layer: same delete-first pattern for pooled_stops unique constraint.
                     $pooledStop = PooledStop::where('order_id', $order->id)->first();
                     if ($pooledStop) {
                         $pooledRoute = $pooledStop->route;
+                        $pooledStop->delete();
                         PooledStop::where('pooled_route_id', $pooledStop->pooled_route_id)
                             ->where('stop_sequence', '>', $pooledStop->stop_sequence)
                             ->decrement('stop_sequence');
-                        $pooledStop->delete();
                         if ($pooledRoute && $pooledRoute->exists) {
                             $remaining = $pooledRoute->stops()->count();
                             $pooledRoute->update($remaining === 0
@@ -566,8 +565,10 @@ class OrderController extends Controller
                         }
                     }
 
-                    // Always clean up pickup-pivot regardless of whether a dropoff stop was found
-                    DB::table('pooled_stop_orders')->where('order_id', $order->id)->delete();
+                    // Pickup-pivot cleanup — safe no-op if table missing until migrate runs.
+                    try {
+                        DB::table('pooled_stop_orders')->where('order_id', $order->id)->delete();
+                    } catch (\Throwable) {}
                 });
             } catch (\Throwable $e) {
                 report($e);
